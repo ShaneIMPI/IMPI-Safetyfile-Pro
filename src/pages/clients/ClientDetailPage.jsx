@@ -141,9 +141,11 @@ function EvidenceTable({ rows, onReview }) {
   if (!rows.length) return <div className="muted">None.</div>
   return (
     <table className="data">
-      <thead><tr><th>Ref</th><th>Title</th><th>Issuing body</th><th>Cert no.</th><th>Expiry</th><th>Status</th><th>File</th><th /></tr></thead>
+      <thead><tr><th>Ref</th><th>Title</th><th>Issuing body</th><th>Cert no.</th><th>Expiry</th><th>Status</th><th>Files</th><th /></tr></thead>
       <tbody>
-        {rows.map((e) => (
+        {rows.map((e) => {
+          const files = e.evidence_document_files ?? []
+          return (
           <tr key={e.id}>
             <td className="mono">{e.document_ref}</td>
             <td>{e.title || '—'}</td>
@@ -151,7 +153,15 @@ function EvidenceTable({ rows, onReview }) {
             <td>{e.certificate_number || '—'}</td>
             <td>{e.expiry_date ? <span className={`pill ${isExpired(e.expiry_date) ? 'risk-extreme' : 'risk-low'}`}>{fmtDate(e.expiry_date)}</span> : '—'}</td>
             <td><span className={`pill status-${e.status}`}>{e.status}</span></td>
-            <td>{e.file_url ? <a href={e.file_url} target="_blank" rel="noreferrer">Open</a> : <span className="muted">—</span>}</td>
+            <td>
+              {files.length === 0
+                ? <span className="muted">—</span>
+                : files.map((f, i) => (
+                    <div key={f.id}>
+                      <a href={f.file_url} target="_blank" rel="noreferrer">{f.file_name || `File ${i + 1}`}</a>
+                    </div>
+                  ))}
+            </td>
             <td style={{ whiteSpace: 'nowrap' }}>
               {e.status === 'pending_review' && (
                 <>
@@ -164,7 +174,8 @@ function EvidenceTable({ rows, onReview }) {
               )}
             </td>
           </tr>
-        ))}
+          )
+        })}
       </tbody>
     </table>
   )

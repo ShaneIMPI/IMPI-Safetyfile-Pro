@@ -45,7 +45,9 @@ function Assembler({ clientId, siteName, profile, clients }) {
     const [generated, evidence, prior] = await Promise.all([
       supabase.from('generated_documents').select('*, document_templates(name, type_code)')
         .eq('client_id', clientId).eq('status', 'final').order('generated_at').then(({ data }) => data ?? []),
-      supabase.from('evidence_documents').select('*').eq('client_id', clientId).eq('status', 'accepted')
+      supabase.from('evidence_documents')
+        .select('*, evidence_document_files(id, file_url, file_name)')
+        .eq('client_id', clientId).eq('status', 'accepted')
         .order('created_at').then(({ data }) => data ?? []),
       db.safetyFiles(clientId),
     ])
@@ -63,10 +65,21 @@ function Assembler({ clientId, siteName, profile, clients }) {
       toc_title: d.title || d.document_templates?.name, url: d.pdf_url, docxUrl: d.file_url,
       include: Boolean(d.pdf_url),
     }))
-    const e = data.evidence.map((d) => ({
-      key: `e:${d.id}`, kind: 'evidence', id: d.id, ref: d.document_ref,
-      toc_title: d.title || d.issuing_body, url: d.file_url, include: isPdf(d.file_url),
-    }))
+    // One accepted evidence entry can hold several files; each file is its own
+    // includable line in the assembled file.
+    const e = data.evidence.flatMap((d) => {
+      const files = d.evidence_document_files ?? []
+      if (files.length === 0) {
+        return [{ key: `e:${d.id}`, kind: 'evidence', id: d.id, ref: d.document_ref, toc_title: d.title || d.issuing_body, url: null, include: false }]
+      }
+      return files.map((f, i) => ({
+        key: `e:${d.id}:${f.id}`, kind: 'evidence', id: d.id, ref: d.document_ref,
+        toc_title: files.length > 1
+          ? `${d.title || d.issuing_body} — ${f.file_name || `file ${i + 1}`}`
+          : (d.title || d.issuing_body),
+        url: f.file_url, include: isPdf(f.file_url),
+      }))
+    })
     setRows([...g, ...e])
   }, [data])
 

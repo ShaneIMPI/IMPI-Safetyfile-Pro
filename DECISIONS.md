@@ -6,6 +6,29 @@ files can reference them (`see DECISIONS.md item N`).
 
 ---
 
+## Addendum (2026-08-30) — multi-file / multi-instance evidence
+
+- New migration **`0005_evidence_files.sql`** (Shane runs it in the Supabase SQL
+  editor like the others). It adds `evidence_document_files` (one-to-many),
+  copies any existing `evidence_documents.file_url` into it, and **drops that
+  column**. Safe to run once; the data-copy step is idempotent.
+- One `evidence_documents` row is still one certificate / instance (one issuing
+  body, one number, one expiry) with its own `IMPI-EVD-…` ref — numbering
+  untouched. Multiple files per row = front/back or multi-page scan of the *same*
+  certificate.
+- Naturally-plural checklist items (crew tickets, per-machine certs): the evidence
+  modal has **+ Add another certificate**, creating separate `evidence_documents`
+  rows against the same `checklist_item_id`, each with its own metadata + files.
+- Every evidence display now renders a **list** of entries/files, not one:
+  audit workspace (under each evidence item), client page evidence table, final
+  assembly (one includable line per file). Document Control Register already had
+  one line per `evidence_documents` row — unchanged.
+- Out of addendum scope, unchanged: `audits.uploaded_file_url` (audit source
+  file), numbering, no OCR / expiry automation. Non-PDF evidence files still
+  can't be merged into the assembled PDF (pre-existing pdf-lib limitation).
+
+---
+
 ## Blockers — need Shane / IMPI to proceed
 
 - **B1. Supabase project.** I can't create the Supabase project or its keys.

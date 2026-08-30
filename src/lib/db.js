@@ -47,7 +47,10 @@ export const db = {
     return q.then(pick)
   },
   evidenceDocs: (clientId) => {
-    let q = supabase.from('evidence_documents').select('*').order('created_at', { ascending: false })
+    let q = supabase
+      .from('evidence_documents')
+      .select('*, evidence_document_files(id, file_url, file_name, uploaded_at)')
+      .order('created_at', { ascending: false })
     if (clientId) q = q.eq('client_id', clientId)
     return q.then(pick)
   },
