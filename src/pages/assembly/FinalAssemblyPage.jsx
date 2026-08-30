@@ -103,7 +103,8 @@ function Assembler({ clientId, siteName, profile, clients }) {
       // 1. Front matter (cover + TOC) as PDF.
       const seqPreview = (data.prior.length + 1)
       const frontMatter = await buildFrontMatterPdf({
-        client, siteName, documentRef: `IMPI-SF-${client?.client_code}-${new Date().getFullYear()}-${String(seqPreview).padStart(3, '0')}`,
+        client, siteName, compiledBy: profile?.full_name || '',
+        documentRef: `IMPI-SF-${client?.client_code}-${new Date().getFullYear()}-${String(seqPreview).padStart(3, '0')}`,
         items: included, logoBytes,
       })
 

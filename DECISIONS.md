@@ -20,11 +20,17 @@ files can reference them (`see DECISIONS.md item N`).
   `supabase secrets set ANTHROPIC_API_KEY=sk-ant-...` then
   `supabase functions deploy audit-suggest`. Without it the audit screen still
   works — every item is reviewed manually (see item 2).
-- **B4. The four approved reference documents.** The brief mentions four sample
-  docs (RA, Method Statement, Audit Report, Safety File Cover/TOC) already built
-  and approved. I didn't have them, so `src/docgen/` re-implements the shared
-  style toolkit from the Section 3 spec. If the originals exist, send them and
-  I'll reconcile fonts/spacing/wording to match exactly.
+- **B4. The four approved reference documents.** ✅ RESOLVED (2026-08-30). Shane
+  supplied all four (`/reference-docs/`). `src/theme/tokens.js` + `src/docgen/*`
+  are now matched to them: gold strap `SAFETY FILE DOCUMENT` / `AUDIT REPORT` /
+  `COMPILED SAFETY FILE` at 10pt +20 tracking; 22pt navy titles; 10pt body;
+  section headings 13pt navy with a navy bottom-rule; doc-control table 3000/6000
+  twips with `F4F5F7` label cells and colon-suffixed labels; RA register is the
+  14-column `No. | Activity | Hazard | Who/What May Be Harmed | Existing Controls
+  | A | B | C | D | R | Risk Rating | Additional Controls | Res. R | ALARP` layout
+  on a landscape section (cover stays portrait); footer is one line —
+  credit left, `Page X of Y` right, grey rule above — on every page including the
+  cover.
 - **B5. IMPI + client logos.** The footer credit line is text (done). Client
   logos are uploaded per-client in the app. No IMPI logo asset is needed given
   the "small footer credit only" rule.
@@ -85,10 +91,8 @@ reflects only what a human has signed off. Change the weights in
     PDF** (`src/lib/pdf.js` → `buildFrontMatterPdf`) so it always merges cleanly.
     `src/docgen/safetyFileCover.js` (the .docx version) is kept for standalone use.
   - Merge + running page numbers use **`pdf-lib`** (`mergePdfs`).
-- **Decision needed from Shane:** is "generate .docx, edit in Word, re-upload PDF"
-  acceptable, or should IMPI want a one-click PDF? A one-click path would mean
-  either (a) a second PDF renderer maintained alongside the docx one, or (b) a
-  LibreOffice-based Edge Function / small conversion service. Not built now.
+- **Decision — CONFIRMED by Shane 2026-08-30:** "generate .docx → tidy in Word →
+  Save As PDF → re-upload" is the Phase-1 workflow. No conversion service.
 
 ### 5. Auth & roles
 - Supabase Auth. `profiles.role` is `staff | client`. **Only `staff` UI exists.**

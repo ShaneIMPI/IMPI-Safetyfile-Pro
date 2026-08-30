@@ -4,9 +4,10 @@
 // branded, sectioned document using the shared toolkit. Bespoke types (RA, MS,
 // Audit Report) have their own dedicated modules.
 
+import { AlignmentType } from 'docx'
 import {
-  buildDocument, makeSection, coverPage, coverFooter, h1, h2, para, muted, bullet,
-  spacer, gridTable, scaledLogo, fetchImageBytes, saveDocx,
+  buildDocument, makeSection, coverPage, coverFooter, MARGIN, h1, h2, para, muted, bullet,
+  spacer, gridTable, scaledLogo, fetchImageBytes, saveDocx, docxBlob,
 } from './shared.js'
 
 export const meta = { typeCode: '*', strap: 'Safety File Document' }
@@ -20,7 +21,7 @@ function renderField(field, value) {
       title: label,
       headers: sub.map((f) => f.label || f.key),
       rows: value.map((row) => sub.map((f) => String(row?.[f.key] ?? ''))),
-      widths: sub.map(() => Math.round(9638 / Math.max(1, sub.length))),
+      widths: sub.map(() => Math.round(10000 / Math.max(1, sub.length))),
     }
   }
   if (Array.isArray(value)) return { block: 'kv', label, value: value.join(', ') }
@@ -28,25 +29,35 @@ function renderField(field, value) {
 }
 
 export async function build(ctx) {
-  const { client, template = {}, responses = {}, documentControl = {} } = ctx
+  const { client, template = {}, responses = {}, documentControl: dc = {} } = ctx
   const title = template.name || 'Safety File Document'
-  const site = responses.site_project_name || documentControl.siteProjectName || ''
+  const site = responses.site_project_name || dc.siteProjectName || ''
   const schema = Array.isArray(template.questionnaire_schema) ? template.questionnaire_schema : []
 
   let logoImg = null
   try { logoImg = client?.logo_url ? await fetchImageBytes(client.logo_url) : null } catch { logoImg = null }
 
+  const controlRows = [
+    ['Document Ref', dc.documentRef || '—'],
+    ['Revision', dc.revision ? `Rev ${dc.revision - 1}` : 'Rev 0'],
+    ['Prepared By', dc.preparedBy || '—'],
+    ['Reviewed By', dc.reviewedBy || '[Pending Review]'],
+    ['Approved By', dc.approvedBy || '[Pending Approval]'],
+    ['Status', dc.status || 'DRAFT — FOR CLIENT REVIEW'],
+  ]
+
   const cover = makeSection({
     orientation: 'portrait',
+    margin: MARGIN.cover,
     header: false,
     footer: coverFooter(),
     children: coverPage({
-      logo: scaledLogo(logoImg, { maxW: 220, maxH: 90 }),
+      logo: scaledLogo(logoImg, { maxW: 220, maxH: 84 }),
       docTypeStrap: meta.strap,
       title,
       clientName: client?.company_name,
       siteName: site,
-      documentControl,
+      controlRows,
     }),
   })
 
@@ -68,15 +79,15 @@ export async function build(ctx) {
       gridTable({
         headers: ['Field', 'Value'],
         rows: kvs.map((f) => [f.label, f.value]),
-        columnWidths: [3200, 6438],
-        totalWidth: 9638,
+        columnWidths: [3000, 7000],
+        headerAligns: [AlignmentType.LEFT, AlignmentType.LEFT],
       }),
     )
   }
   for (const f of fields.filter((x) => x.block === 'table')) {
     children.push(h2(f.title))
     if (f.rows.length) {
-      children.push(gridTable({ headers: f.headers, rows: f.rows, columnWidths: f.widths, totalWidth: f.widths.reduce((a, b) => a + b, 0) }))
+      children.push(gridTable({ headers: f.headers, rows: f.rows, columnWidths: f.widths }))
     } else {
       children.push(muted('No entries captured.'))
     }
@@ -88,19 +99,23 @@ export async function build(ctx) {
     bullet('Review at least annually, or on any change of scope, personnel, plant or legislation.'),
     bullet('All affected persons are to be briefed and the briefing recorded.'),
     spacer(240),
-    para(`Prepared by: ${documentControl.preparedBy || ''}   Signature: ______________   Date: __________`),
+    para(`Prepared by: ${dc.preparedBy || ''}   Signature: ______________   Date: __________`),
     spacer(100),
-    para(`Reviewed by: ${documentControl.reviewedBy || ''}   Signature: ______________   Date: __________`),
+    para(`Reviewed by: ${dc.reviewedBy || ''}   Signature: ______________   Date: __________`),
     spacer(100),
-    para(`Approved by: ${documentControl.approvedBy || ''}   Signature: ______________   Date: __________`),
+    para(`Approved by: ${dc.approvedBy || ''}   Signature: ______________   Date: __________`),
   )
 
-  const body = makeSection({ orientation: 'portrait', titleForHeader: title, children })
+  const body = makeSection({ orientation: 'portrait', margin: MARGIN.body, titleForHeader: title, children })
   const doc = buildDocument({ title, sections: [cover, body] })
-  return { doc, title, filename: `${documentControl.documentRef || title}.docx` }
+  return { doc, title, filename: `${dc.documentRef || title}.docx` }
 }
 
 export async function generateAndSave(ctx) {
   const { doc, filename } = await build(ctx)
   await saveDocx(doc, filename)
+}
+export async function buildBlob(ctx) {
+  const { doc } = await build(ctx)
+  return docxBlob(doc)
 }

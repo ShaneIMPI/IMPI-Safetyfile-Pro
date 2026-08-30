@@ -29,16 +29,26 @@ export const COLOR = Object.fromEntries(
 
 // --- Typography ------------------------------------------------------------------
 export const FONT = 'Calibri'
-// docx font sizes are in half-points (22 = 11pt).
+// docx font sizes are in half-points (20 = 10pt). Values below are matched
+// to the four approved reference templates in /reference-docs.
 export const SIZE = {
-  coverTitle: 40, // 20pt
-  coverStrap: 20, // 10pt, letter-spaced, gold, uppercase
-  h1: 30, // 15pt
-  h2: 24, // 12pt
-  h3: 22, // 11pt bold
-  body: 22, // 11pt
-  table: 20, // 10pt
-  small: 16, // 8pt  (footer credit, distribution notice)
+  coverStrap: 20, // 10pt, gold, uppercase, +20 twip tracking
+  coverTitle: 44, // 22pt, navy, bold
+  coverClient: 26, // 13pt, navy-soft
+  coverSite: 22, // 11pt, italic, muted
+  ctlLabel: 18, // 9pt, bold navy, on F4F5F7
+  ctlValue: 20, // 10pt, body
+  notice: 16, // 8pt, italic, muted, centred
+  h1: 26, // 13pt section heading, navy, bold, navy bottom-rule
+  h2: 22, // 11pt subheading, navy-soft, bold
+  h3: 22,
+  body: 20, // 10pt body copy
+  table: 17, // 8.5pt portrait tables (Method Statement, Audit Report)
+  raText: 15, // 7.5pt landscape risk register
+  toc: 22, // 11pt TOC entries
+  tocIntro: 19, // 9.5pt TOC intro / notes
+  footer: 14, // 7pt footer credit + page number
+  small: 14,
 }
 
 // --- Risk scoring (A x B x C x D = R) -------------------------------------------
@@ -60,8 +70,8 @@ export function riskBand(score) {
 // The client's own logo is the primary branding on every document.
 export const IMPI = {
   legalName: 'IMPI Protection Agency (Pty) Ltd',
-  creditLine: 'Compiled by IMPI Protection Agency (Pty) Ltd | 012 543 0640 | info@impi-secure.co.za',
+  // Two spaces around each pipe — matches the reference templates.
+  creditLine: 'Compiled by IMPI Protection Agency (Pty) Ltd  |  012 543 0640  |  info@impi-secure.co.za',
   distributionNotice:
-    'This document is issued for the exclusive use of the client named above and its appointed ' +
-    'representatives. It may not be reproduced or distributed without written permission.',
+    'Prepared for the exclusive use of the above client. Distribution outside this scope requires written consent.',
 }

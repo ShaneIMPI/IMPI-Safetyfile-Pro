@@ -128,7 +128,8 @@ begin
   select dt.id, s.id
   from document_templates dt
   cross join sectors s
-  where dt.type_code in ('POL','LAR','RA','MS','EMP','PPE','AUD','LOGS','TAX','PLI','COMPCERT');
+  where dt.type_code in ('POL','LAR','RA','MS','EMP','PPE','AUD','LOGS','TAX','PLI','COMPCERT')
+  on conflict do nothing;
 
   insert into document_template_sectors (document_template_id, sector_id)
   select dt.id, x.sid from document_templates dt
@@ -138,7 +139,8 @@ begin
     ('ENGCERT', s_events),
     ('COC', s_events),('COC', s_constr),('COC', s_factory),('COC', s_wh),
     ('RACK', s_wh),('LOADTEST', s_wh),('LOADTEST', s_events),('LOADTEST', s_factory)
-  ) as x(code, sid) on x.code = dt.type_code;
+  ) as x(code, sid) on x.code = dt.type_code
+  on conflict do nothing;
 
   -- ------------------------------------------------------------- Checklists
   insert into checklists (sector_id, name, description) values
@@ -312,18 +314,22 @@ begin
   ('Loading / offloading (warehouse)','Position vehicle; apply brakes, chocks and trailer restraint / dock lock; confirm dock-leveller condition; control pedestrian access during operation.','Trailer creep; fall from edge; pedestrian struck — restraint, edge protection, exclusion.','Warehouse Supervisor',30),
   ('Demobilisation','Remove waste and materials; inspect area for damage/hazards left behind; restore barriers; sign off area as safe and hand back.','Residual hazards; slips/trips — housekeeping, final inspection, handover record.','Site Supervisor',90);
 
-  -- Tag method steps to sectors
+  -- Tag method steps to sectors. Universal activity types go to every sector;
+  -- the rest are sector-specific. 'Work at height' / 'Lifting operation' are
+  -- universal, so they are NOT re-added per sector below.
   insert into method_step_library_sectors (method_step_library_id, sector_id)
   select m.id, s.id from method_step_library m cross join sectors s
-  where m.activity_type in ('Site establishment','Work at height','Lifting operation','Demobilisation');
+  where m.activity_type in ('Site establishment','Work at height','Lifting operation','Demobilisation')
+  on conflict do nothing;
   insert into method_step_library_sectors (method_step_library_id, sector_id)
-  select m.id, s_events from method_step_library m where m.activity_type = 'Rigging (event)';
+  select m.id, s_events from method_step_library m where m.activity_type = 'Rigging (event)'
+  on conflict do nothing;
   insert into method_step_library_sectors (method_step_library_id, sector_id)
-  select m.id, s_factory from method_step_library m where m.activity_type = 'Lock-out / Tag-out';
+  select m.id, s_factory from method_step_library m where m.activity_type = 'Lock-out / Tag-out'
+  on conflict do nothing;
   insert into method_step_library_sectors (method_step_library_id, sector_id)
-  select m.id, s_wh from method_step_library m where m.activity_type = 'Loading / offloading (warehouse)';
-  insert into method_step_library_sectors (method_step_library_id, sector_id)
-  select m.id, s_constr from method_step_library m where m.activity_type in ('Lifting operation','Work at height');
+  select m.id, s_wh from method_step_library m where m.activity_type = 'Loading / offloading (warehouse)'
+  on conflict do nothing;
 
   raise notice 'IMPI seed: complete.';
 end $$;

@@ -66,7 +66,10 @@ export async function mergePdfs(sources, { footerText = IMPI.creditLine, addPage
   return merged.save()
 }
 
-export async function buildFrontMatterPdf({ client, siteName, documentRef, revision = 1, items = [], logoBytes }) {
+export async function buildFrontMatterPdf({
+  client, siteName, documentRef, revision = 1, items = [], logoBytes,
+  title = 'Health & Safety File', compiledBy = '', status = 'FINAL — FOR SUBMISSION',
+}) {
   const doc = await PDFDocument.create()
   const font = await doc.embedFont(StandardFonts.Helvetica)
   const bold = await doc.embedFont(StandardFonts.HelveticaBold)
@@ -91,29 +94,35 @@ export async function buildFrontMatterPdf({ client, siteName, documentRef, revis
       y -= img.height * scale + 40
     } catch { /* skip logo */ }
   }
-  y -= 60
-  cover.drawText('SAFETY FILE', { x: 56, y, size: 11, font: bold, color: gold, characterSpacing: 3 })
-  y -= 34
-  cover.drawText('Health & Safety File', { x: 56, y, size: 26, font: bold, color: navy })
-  y -= 30
-  cover.drawText(client?.company_name || '', { x: 56, y, size: 14, font: bold, color: hexToRgb(HEX.body) })
+  y -= 56
+  cover.drawText('COMPILED SAFETY FILE', { x: 56, y, size: 10, font: bold, color: gold, characterSpacing: 1.5 })
+  y -= 32
+  cover.drawText(title, { x: 56, y, size: 24, font: bold, color: navy })
+  y -= 26
+  cover.drawText(client?.company_name || '', { x: 56, y, size: 13, font, color: hexToRgb(HEX.navySoft) })
   if (siteName) {
-    y -= 18
+    y -= 17
     cover.drawText(siteName, { x: 56, y, size: 11, font, color: muted })
   }
-  y -= 44
+  y -= 40
 
   const ctl = [
-    ['Document Ref', documentRef || '—'],
-    ['Revision', String(revision)],
-    ['Compiled', new Date().toLocaleDateString('en-ZA')],
-    ['Status', 'Issued'],
+    ['Document Ref:', documentRef || '—'],
+    ['Revision:', `Rev ${Math.max(0, revision - 1)}`],
+    ['Compiled By:', compiledBy || '—'],
+    ['Compilation Date:', new Date().toLocaleDateString('en-ZA')],
+    ['Status:', status],
   ]
   for (const [k, v] of ctl) {
     cover.drawText(k, { x: 56, y, size: 9, font: bold, color: navy })
-    cover.drawText(v, { x: 200, y, size: 9, font, color: hexToRgb(HEX.body) })
+    cover.drawText(v, { x: 190, y, size: 9, font, color: hexToRgb(HEX.body) })
     y -= 16
   }
+  y -= 24
+  cover.drawText(
+    'Prepared for the exclusive use of the above client. Distribution outside this scope requires written consent.',
+    { x: 56, y, size: 8, font, color: muted },
+  )
   cover.drawText(IMPI.creditLine, { x: 56, y: 40, size: 7, font, color: muted })
 
   // --- Table of Contents ------------------------------------------
@@ -121,23 +130,36 @@ export async function buildFrontMatterPdf({ client, siteName, documentRef, revis
   y = H - 72
   page.drawText('Table of Contents', { x: 56, y, size: 18, font: bold, color: navy })
   y -= 12
-  page.drawLine({ start: { x: 56, y }, end: { x: W - 56, y }, thickness: 1, color: rule })
-  y -= 28
+  page.drawLine({ start: { x: 56, y }, end: { x: W - 56, y }, thickness: 1, color: navy })
+  y -= 26
+  page.drawText(
+    'This safety file has been compiled by IMPI Protection Agency (Pty) Ltd on behalf of the above client,',
+    { x: 56, y, size: 8.5, font, color: muted },
+  )
+  y -= 12
+  page.drawText('incorporating the audit findings and all required supporting documentation as listed below.',
+    { x: 56, y, size: 8.5, font, color: muted })
+  y -= 26
 
   items.forEach((it, i) => {
-    if (y < 70) {
-      page = doc.addPage([W, H])
-      y = H - 72
-    }
-    const label = `${i + 1}.  ${it.toc_title || it.title || it.document_ref || 'Document'}`
+    if (y < 80) { page = doc.addPage([W, H]); y = H - 72 }
+    const num = `${i + 1}.`
+    const titleText = it.toc_title || it.title || it.document_ref || 'Document'
     const refText = it.document_ref || ''
-    page.drawText(label.slice(0, 78), { x: 56, y, size: 10, font, color: hexToRgb(HEX.body) })
+    page.drawText(num, { x: 56, y, size: 10, font: bold, color: navy })
+    page.drawText(titleText.slice(0, 74), { x: 82, y, size: 10, font, color: hexToRgb(HEX.body) })
     page.drawText(refText, { x: W - 56 - font.widthOfTextAtSize(refText, 9), y, size: 9, font, color: muted })
     y -= 18
   })
-  if (!items.length) {
-    page.drawText('No documents selected.', { x: 56, y, size: 10, font, color: muted })
-  }
+  if (!items.length) page.drawText('No documents selected.', { x: 56, y, size: 10, font, color: muted })
+
+  y -= 22
+  page.drawLine({ start: { x: 56, y }, end: { x: W - 56, y }, thickness: 0.75, color: rule })
+  y -= 16
+  page.drawText('Document Control', { x: 56, y, size: 10, font: bold, color: navy })
+  y -= 14
+  page.drawText('Page numbers reflect the final assembled PDF pagination once all supporting documents have been merged.',
+    { x: 56, y, size: 8, font, color: muted })
 
   return doc.save()
 }
