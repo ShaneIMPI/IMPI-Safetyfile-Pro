@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase, uploadFile } from '../../lib/supabase.js'
 import { db } from '../../lib/db.js'
@@ -34,6 +34,15 @@ export default function DocumentBuilderPage() {
   })
   const [result, setResult] = useState(null)
   const clientSectorIds = useClientSectors(clientId)
+
+  // Gap resolution deep-link: /documents?client=X&item=<checklist_item_id>
+  // pre-selects the template the checklist item requires.
+  const itemId = params.get('item')
+  useEffect(() => {
+    if (!itemId) return
+    supabase.from('checklist_items').select('required_document_type_id').eq('id', itemId).single()
+      .then(({ data }) => { if (data?.required_document_type_id) setTemplateId(data.required_document_type_id) })
+  }, [itemId])
 
   if (loading) return <Spinner />
   if (error) return <ErrorBanner error={error} />
