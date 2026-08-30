@@ -1,10 +1,13 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// GitHub Pages serves this project from https://<user>.github.io/impi-safetyfile-pro/
-// so the build must be prefixed with the repo name. Override with VITE_BASE if the
-// repo is ever renamed or served from a custom domain (set VITE_BASE=/ in that case).
-const base = process.env.VITE_BASE ?? '/impi-safetyfile-pro/'
+// GitHub Pages serves this project from https://<user>.github.io/<repo>/ and that
+// path is CASE-SENSITIVE, so the build's asset prefix must match the repo name
+// exactly. In GitHub Actions, GITHUB_REPOSITORY is "owner/repo" — derive the base
+// from it so a rename or different casing can never break the deploy. Locally
+// (no GITHUB_REPOSITORY) we serve from root. Override with VITE_BASE for a custom domain.
+const ghRepo = process.env.GITHUB_REPOSITORY?.split('/')[1]
+const base = process.env.VITE_BASE ?? (ghRepo ? `/${ghRepo}/` : '/')
 
 export default defineConfig({
   base,

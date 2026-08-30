@@ -37,7 +37,7 @@ cp .env.example .env.local     # then paste your Supabase URL + anon key
 npm run dev
 ```
 
-Open the printed `http://localhost:xxxx/impi-safetyfile-pro/` URL and sign in.
+Open the printed `http://localhost:5173/` URL and sign in.
 
 ### 1.3 GitHub repo + Pages deploy
 
@@ -53,8 +53,10 @@ Open the printed `http://localhost:xxxx/impi-safetyfile-pro/` URL and sign in.
    (`.github/workflows/deploy.yml`). The site URL appears in the Actions run and
    under Settings → Pages.
 
-If you rename the repo or use a custom domain, set `VITE_BASE` accordingly
-(a repo secret/variable) — e.g. `VITE_BASE=/` for a custom domain.
+The deployed base path is derived automatically from the repo name in CI
+(`GITHUB_REPOSITORY`), so it always matches the case-sensitive Pages URL
+`https://<user>.github.io/<repo>/`. For a custom domain, set a repo variable
+`VITE_BASE=/`.
 
 ### 1.4 (Optional) AI-assisted audit hints
 
