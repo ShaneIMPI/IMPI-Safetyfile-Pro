@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { supabase, uploadFile } from '../../lib/supabase.js'
+import { neonClient, uploadFile, callAuditSuggest } from '../../lib/neon.js'
 import { db } from '../../lib/db.js'
 import { useAuth } from '../../auth/AuthProvider.jsx'
 import { useQuery, useAsyncAction } from '../../hooks/useQuery.js'
@@ -15,10 +15,10 @@ const STATUSES = ['compliant', 'partial', 'non_compliant', 'not_applicable']
 async function load(id) {
   const audit = await db.audit(id)
   const [items, results, evidence] = await Promise.all([
-    supabase.from('checklist_items').select('*, document_templates(id, name, type_code, source_type)')
+    neonClient.from('checklist_items').select('*, document_templates(id, name, type_code, source_type)')
       .eq('checklist_id', audit.checklist_id).order('sort_order').then(({ data }) => data ?? []),
     db.auditResults(id),
-    supabase.from('evidence_documents')
+    neonClient.from('evidence_documents')
       .select('*, evidence_document_files(id, file_url, file_name)')
       .eq('audit_id', id).order('created_at').then(({ data }) => data ?? []),
   ])
@@ -68,14 +68,13 @@ export default function AuditWorkspacePage() {
         id: m.item.id, item_text: m.item.item_text, category: m.item.category,
         regulation_reference: m.item.regulation_reference,
       }))
-      const { data: resp, error: fnErr } = await supabase.functions.invoke('audit-suggest', { body: { documentText: text, items } })
-      if (fnErr) throw fnErr
+      const resp = await callAuditSuggest({ documentText: text, items })
       if (resp?.disabled) { setAiState('disabled'); return }
       const map = new Map((resp.results || []).map((r) => [r.id, r]))
       for (const m of merged) {
         const s = map.get(m.item.id)
         if (!s) continue
-        await supabase.from('audit_results')
+        await neonClient.from('audit_results')
           .update({ ai_suggested_status: normalise(s.status), ai_rationale: [s.rationale, s.page_ref && `(${s.page_ref})`].filter(Boolean).join(' ') })
           .eq('audit_id', id).eq('checklist_item_id', m.item.id)
       }
@@ -89,7 +88,7 @@ export default function AuditWorkspacePage() {
 
   async function patchResult(itemId, patch) {
     await runAction(async () => {
-      await supabase.from('audit_results').update(patch).eq('audit_id', id).eq('checklist_item_id', itemId)
+      await neonClient.from('audit_results').update(patch).eq('audit_id', id).eq('checklist_item_id', itemId)
       refetch()
     })
   }
@@ -228,7 +227,7 @@ export default function AuditWorkspacePage() {
 const normalise = (s) => (STATUSES.includes(s) ? s : s === 'compliant' ? 'compliant' : 'non_compliant')
 
 async function templateIdByCode(code) {
-  const { data } = await supabase.from('document_templates').select('id').eq('type_code', code).single()
+  const { data } = await neonClient.from('document_templates').select('id').eq('type_code', code).single()
   return data?.id
 }
 

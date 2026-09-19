@@ -22,16 +22,11 @@ create table if not exists evidence_document_files (
 create index if not exists evidence_document_files_parent_idx
   on evidence_document_files (evidence_document_id);
 
--- Move any existing single file onto the new table, then drop the column.
-insert into evidence_document_files (evidence_document_id, file_url, file_name, uploaded_at)
-select id, file_url, null, created_at
-from evidence_documents
-where file_url is not null and btrim(file_url) <> ''
-  and not exists (
-    select 1 from evidence_document_files f where f.evidence_document_id = evidence_documents.id
-  );
-
-alter table evidence_documents drop column if exists file_url;
+-- NEON NOTE: on Supabase this migration also copied evidence_documents.file_url
+-- into this table and dropped that column — needed there because it was an
+-- ALTER on a live database with existing rows. This migration set targets a
+-- brand-new Neon database (0001_schema.sql never creates that column at all),
+-- so there is nothing to migrate; that step is intentionally omitted here.
 
 -- --- RLS (mirrors evidence_documents) ---------------------------------
 alter table evidence_document_files enable row level security;

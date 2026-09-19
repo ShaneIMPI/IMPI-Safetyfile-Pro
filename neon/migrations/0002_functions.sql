@@ -2,33 +2,43 @@
 -- IMPI SafetyFile Pro — 0002 functions, numbering, triggers
 -- ===========================================================================
 
--- --- Auth helpers ------------------------------------------------------
+-- --- Auth helpers (Neon Auth / Neon Data API) --------------------------
+-- auth.user_id() is provided by Neon's Data API (pg_session_jwt extension) —
+-- it reads the `sub` claim of the caller's Neon Auth JWT. It is Neon's direct
+-- equivalent of Supabase's auth.uid(), except it returns the JWT subject as
+-- TEXT rather than a Postgres uuid, which is why profiles.id is text (see
+-- the NEON NOTE in 0001_schema.sql).
 create or replace function is_staff()
 returns boolean language sql stable security definer set search_path = public as $$
-  select exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'staff');
+  select exists (select 1 from profiles p where p.id = auth.user_id() and p.role = 'staff');
 $$;
 
 create or replace function current_client_id()
 returns uuid language sql stable security definer set search_path = public as $$
-  select client_id from profiles where id = auth.uid();
+  select client_id from profiles where id = auth.user_id();
 $$;
 
--- Create a profile row automatically for every new auth user.
--- Default role is 'staff' in Phase 1 (invite-only project). Flip to 'client'
--- manually or via the Phase-2 invite flow.
-create or replace function handle_new_user()
-returns trigger language plpgsql security definer set search_path = public as $$
+-- Idempotently create the caller's own profile row on first login.
+--
+-- NEON NOTE: there is deliberately no database trigger on the Neon Auth user
+-- table (equivalent to Supabase's `handle_new_user` trigger on `auth.users`).
+-- Two reasons: (1) Neon's own docs advise against taking a hard dependency on
+-- the internals of the `neon_auth` schema, and DDL/trigger permissions on a
+-- Neon-managed schema aren't guaranteed; (2) `auth.user_id()` — the only
+-- caller-scoped identity available inside Postgres — is only populated on an
+-- authenticated Data API request, not inside a plain insert trigger context.
+-- Instead the client calls this function (as a Data API RPC call) right after
+-- sign-in; see src/auth/AuthProvider.jsx. SECURITY DEFINER + reading
+-- auth.user_id() server-side means a caller can only ever create/touch THEIR
+-- OWN profile row, never someone else's — no additional RLS insert policy is
+-- needed because this is the only insert path.
+create or replace function ensure_profile(p_full_name text default null)
+returns void language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, full_name)
-  values (new.id, coalesce(new.raw_user_meta_data->>'full_name', new.email))
+  insert into profiles (id, full_name)
+  values (auth.user_id(), p_full_name)
   on conflict (id) do nothing;
-  return new;
 end $$;
-
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute function handle_new_user();
 
 -- --- Client code generation -----------------------------------------
 -- Compact uppercase alphanumerics of the company name, first 6 chars,

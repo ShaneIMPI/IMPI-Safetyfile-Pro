@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { supabase, uploadFile } from '../../lib/supabase.js'
+import { neonClient, uploadFile } from '../../lib/neon.js'
 import { db } from '../../lib/db.js'
 import { useAuth } from '../../auth/AuthProvider.jsx'
 import { useQuery, useAsyncAction } from '../../hooks/useQuery.js'
@@ -40,7 +40,7 @@ export default function DocumentBuilderPage() {
   const itemId = params.get('item')
   useEffect(() => {
     if (!itemId) return
-    supabase.from('checklist_items').select('required_document_type_id').eq('id', itemId).single()
+    neonClient.from('checklist_items').select('required_document_type_id').eq('id', itemId).single()
       .then(({ data }) => { if (data?.required_document_type_id) setTemplateId(data.required_document_type_id) })
   }, [itemId])
 
@@ -236,7 +236,7 @@ function sectorMatch(links, clientSectorIds) {
 function useClientSectors(clientId) {
   const { data } = useQuery(async () => {
     if (!clientId) return []
-    const { data } = await supabase.from('client_sectors').select('sector_id').eq('client_id', clientId)
+    const { data } = await neonClient.from('client_sectors').select('sector_id').eq('client_id', clientId)
     return (data ?? []).map((r) => r.sector_id)
   }, [clientId])
   return data ?? []

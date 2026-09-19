@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { supabase } from '../../lib/supabase.js'
+import { neonClient } from '../../lib/neon.js'
 import { db } from '../../lib/db.js'
 import { useQuery } from '../../hooks/useQuery.js'
 import { Spinner, ErrorBanner, Toolbar } from '../../components/ui.jsx'
@@ -7,7 +7,7 @@ import { fmtDate, refSortKey } from '../../lib/format.js'
 
 async function load() {
   const [rows, clients] = await Promise.all([
-    supabase.from('document_control_register').select('*').then(({ data, error }) => { if (error) throw error; return data }),
+    neonClient.from('document_control_register').select('*').then(({ data, error }) => { if (error) throw error; return data }),
     db.clients(),
   ])
   const cmap = Object.fromEntries(clients.map((c) => [c.id, c.company_name]))

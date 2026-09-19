@@ -1,46 +1,48 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
-import { supabase, isConfigured } from '../lib/supabase.js'
+import { neonClient, authClient, isConfigured } from '../lib/neon.js'
 
 const AuthCtx = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(null)
-  const [profile, setProfile] = useState(null)
-  const [loading, setLoading] = useState(true)
+  // authClient.useSession() is Neon Auth's own React hook (Managed Better
+  // Auth) — it tracks sign-in/out and token refresh for us, so there's no
+  // manual subscription to wire up the way supabase-js needed.
+  const { data: sessionData, isPending } = authClient.useSession()
+  const user = sessionData?.user ?? null
 
-  const loadProfile = useCallback(async (userId) => {
-    if (!userId) { setProfile(null); return }
-    const { data } = await supabase
+  const [profile, setProfile] = useState(null)
+  const [profileLoading, setProfileLoading] = useState(true)
+
+  const loadProfile = useCallback(async () => {
+    if (!user?.id) { setProfile(null); setProfileLoading(false); return }
+    setProfileLoading(true)
+    // First login for this user: create their own profile row. ensure_profile()
+    // is SECURITY DEFINER and reads auth.user_id() itself server-side, so a
+    // caller can only ever create/touch their OWN row (0002_functions.sql).
+    await neonClient.rpc('ensure_profile', { p_full_name: user.name ?? user.email ?? null }).catch(() => {})
+    const { data } = await neonClient
       .from('profiles')
       .select('id, role, full_name, phone, client_id')
-      .eq('id', userId)
+      .eq('id', user.id)
       .maybeSingle()
-    setProfile(data ?? { id: userId, role: 'staff', full_name: null })
-  }, [])
+    setProfile(data ?? { id: user.id, role: 'staff', full_name: null })
+    setProfileLoading(false)
+  }, [user?.id])
 
   useEffect(() => {
-    if (!isConfigured) { setLoading(false); return }
-    supabase.auth.getSession().then(async ({ data }) => {
-      setSession(data.session)
-      await loadProfile(data.session?.user?.id)
-      setLoading(false)
-    })
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_e, s) => {
-      setSession(s)
-      await loadProfile(s?.user?.id)
-    })
-    return () => sub.subscription.unsubscribe()
+    if (!isConfigured) { setProfileLoading(false); return }
+    loadProfile()
   }, [loadProfile])
 
   const value = {
-    session,
-    user: session?.user ?? null,
+    session: sessionData,
+    user,
     profile,
     role: profile?.role ?? null,
     isStaff: profile?.role === 'staff',
-    loading,
-    signOut: () => supabase.auth.signOut(),
-    refreshProfile: () => loadProfile(session?.user?.id),
+    loading: isConfigured ? (isPending || profileLoading) : false,
+    signOut: () => authClient.signOut(),
+    refreshProfile: loadProfile,
   }
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>
 }

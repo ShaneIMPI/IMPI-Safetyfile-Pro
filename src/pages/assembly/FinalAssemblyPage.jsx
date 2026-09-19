@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { supabase, uploadFile } from '../../lib/supabase.js'
+import { neonClient, uploadFile } from '../../lib/neon.js'
 import { db } from '../../lib/db.js'
 import { useAuth } from '../../auth/AuthProvider.jsx'
 import { useQuery, useAsyncAction } from '../../hooks/useQuery.js'
@@ -43,9 +43,9 @@ export default function FinalAssemblyPage() {
 function Assembler({ clientId, siteName, profile, clients }) {
   const { data, loading, error, refetch } = useQuery(async () => {
     const [generated, evidence, prior] = await Promise.all([
-      supabase.from('generated_documents').select('*, document_templates(name, type_code)')
+      neonClient.from('generated_documents').select('*, document_templates(name, type_code)')
         .eq('client_id', clientId).eq('status', 'final').order('generated_at').then(({ data }) => data ?? []),
-      supabase.from('evidence_documents')
+      neonClient.from('evidence_documents')
         .select('*, evidence_document_files(id, file_url, file_name)')
         .eq('client_id', clientId).eq('status', 'accepted')
         .order('created_at').then(({ data }) => data ?? []),

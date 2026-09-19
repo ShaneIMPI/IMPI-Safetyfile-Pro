@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { supabase } from '../../lib/supabase.js'
+import { neonClient } from '../../lib/neon.js'
 import { db } from '../../lib/db.js'
 import { useQuery, useAsyncAction } from '../../hooks/useQuery.js'
 import { Spinner, ErrorBanner, Modal, Field, ConfirmButton } from '../../components/ui.jsx'
@@ -10,7 +10,7 @@ async function load() {
     db.sectors(),
     db.hazardLibrary(),
     db.methodLibrary(),
-    supabase.from('library_gap_flags').select('*').order('created_at', { ascending: false }).then(({ data }) => data ?? []),
+    neonClient.from('library_gap_flags').select('*').order('created_at', { ascending: false }).then(({ data }) => data ?? []),
   ])
   return { sectors, hazards, methods, gaps }
 }
@@ -34,8 +34,8 @@ export default function LibraryPage() {
         default_c: +form.default_c || 1, default_d: +form.default_d || 1, active: form.active ?? true,
       }
       const row = form.id ? await db.update('hazard_library', form.id, payload) : await db.insert('hazard_library', payload)
-      await supabase.from('hazard_library_sectors').delete().eq('hazard_library_id', row.id)
-      if (sectorIds.length) await supabase.from('hazard_library_sectors').insert(sectorIds.map((sid) => ({ hazard_library_id: row.id, sector_id: sid })))
+      await neonClient.from('hazard_library_sectors').delete().eq('hazard_library_id', row.id)
+      if (sectorIds.length) await neonClient.from('hazard_library_sectors').insert(sectorIds.map((sid) => ({ hazard_library_id: row.id, sector_id: sid })))
       setModal(null); refetch()
     })
   }
@@ -47,8 +47,8 @@ export default function LibraryPage() {
         sort_hint: +form.sort_hint || 0, active: form.active ?? true,
       }
       const row = form.id ? await db.update('method_step_library', form.id, payload) : await db.insert('method_step_library', payload)
-      await supabase.from('method_step_library_sectors').delete().eq('method_step_library_id', row.id)
-      if (sectorIds.length) await supabase.from('method_step_library_sectors').insert(sectorIds.map((sid) => ({ method_step_library_id: row.id, sector_id: sid })))
+      await neonClient.from('method_step_library_sectors').delete().eq('method_step_library_id', row.id)
+      if (sectorIds.length) await neonClient.from('method_step_library_sectors').insert(sectorIds.map((sid) => ({ method_step_library_id: row.id, sector_id: sid })))
       setModal(null); refetch()
     })
   }

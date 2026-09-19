@@ -1,7 +1,19 @@
 -- ===========================================================================
--- IMPI SafetyFile Pro — 0001 schema
+-- IMPI SafetyFile Pro — 0001 schema  (Neon Postgres)
 -- Phase 1 (staff-only UI). The `client` role and client-scoped columns exist
 -- now so Phase 2 (client login) needs no schema rebuild. See DECISIONS.md.
+--
+-- NEON NOTE: `profiles.id` and every *_by / created_by column that references
+-- it are TEXT, not uuid. Neon Auth (Managed Better Auth) issues its own user
+-- ids in the `neon_auth` schema and Neon's own docs warn against taking a hard
+-- FK dependency on that schema's internal keys (its unique constraints "may
+-- change in future updates"). So `profiles` deliberately has NO foreign key
+-- into `neon_auth` — it's a plain text primary key populated by the app on
+-- first login (see 0002_functions.sql) and matched at query time against
+-- auth.user_id() (the JWT subject Neon's Data API exposes to RLS policies).
+-- Confirm the exact id format against your own Neon Auth console before
+-- relying on this in anger — text safely accepts either a uuid-formatted or
+-- a plain string id, which is why it's the safer default here.
 -- ===========================================================================
 
 create extension if not exists "pgcrypto";
@@ -28,9 +40,9 @@ create table clients (
   created_at       timestamptz not null default now()
 );
 
--- --- Profiles (1:1 with auth.users) -----------------------------------
+-- --- Profiles (one row per Neon Auth user; see NEON NOTE above) ----------
 create table profiles (
-  id          uuid primary key references auth.users(id) on delete cascade,
+  id          text primary key,
   role        user_role not null default 'staff',
   full_name   text,
   phone       text,
@@ -108,7 +120,7 @@ create table hazard_library (
   default_d            smallint not null default 1,
   regulation_reference text,
   active               boolean not null default true,
-  created_by           uuid references profiles(id) on delete set null,
+  created_by           text references profiles(id) on delete set null,
   created_at           timestamptz not null default now()
 );
 
@@ -126,7 +138,7 @@ create table method_step_library (
   responsible_role_default text,
   sort_hint              integer not null default 0,
   active                 boolean not null default true,
-  created_by             uuid references profiles(id) on delete set null,
+  created_by             text references profiles(id) on delete set null,
   created_at             timestamptz not null default now()
 );
 
@@ -146,7 +158,7 @@ create table library_gap_flags (
   proposed    jsonb,                          -- staff's draft entry
   status      text not null default 'open' check (status in ('open', 'drafted', 'approved', 'dismissed')),
   resolved_library_id uuid,                   -- id of the created library row once approved
-  created_by  uuid references profiles(id) on delete set null,
+  created_by  text references profiles(id) on delete set null,
   created_at  timestamptz not null default now()
 );
 
@@ -158,7 +170,7 @@ create table audits (
   uploaded_file_url text,
   status            audit_status not null default 'in_progress',
   overall_score     numeric(5,2),            -- 0-100, computed from CONFIRMED results only
-  audited_by        uuid references profiles(id) on delete set null,
+  audited_by        text references profiles(id) on delete set null,
   audit_date        date not null default current_date,
   created_at        timestamptz not null default now()
 );
@@ -173,12 +185,14 @@ create table audit_results (
   reviewer_notes     text,
   evidence_page_ref  text,
   action_required    text,
-  reviewed_by        uuid references profiles(id) on delete set null,
+  reviewed_by        text references profiles(id) on delete set null,
   reviewed_at        timestamptz,
   unique (audit_id, checklist_item_id)
 );
 
 -- --- Evidence documents (third-party issued; IMPI files, never authors) --
+-- File(s) live one-to-many in evidence_document_files (0005) — never a single
+-- column here, since one certificate can span several scans/pages.
 create table evidence_documents (
   id                uuid primary key default gen_random_uuid(),
   client_id         uuid not null references clients(id) on delete cascade,
@@ -188,14 +202,13 @@ create table evidence_documents (
   doc_year          int,
   seq               int,
   title             text,
-  file_url          text,
   issuing_body      text,
   certificate_number text,
   issue_date        date,
   expiry_date       date,                    -- drives future audit re-flagging when lapsed
   status            evidence_status not null default 'pending_review',
-  reviewed_by       uuid references profiles(id) on delete set null,
-  uploaded_by       uuid references profiles(id) on delete set null,
+  reviewed_by       text references profiles(id) on delete set null,
+  uploaded_by       text references profiles(id) on delete set null,
   created_at        timestamptz not null default now()
 );
 
@@ -220,7 +233,7 @@ create table generated_documents (
   file_url             text,                 -- .docx produced by the generator
   pdf_url              text,                 -- PDF rendition used for final assembly (see DECISIONS.md item 4)
   status               generated_status not null default 'draft',
-  generated_by         uuid references profiles(id) on delete set null,
+  generated_by         text references profiles(id) on delete set null,
   generated_at         timestamptz not null default now()
 );
 
@@ -235,7 +248,7 @@ create table questionnaire_responses (
   document_template_id uuid not null references document_templates(id) on delete restrict,
   audit_id             uuid references audits(id) on delete set null,
   responses            jsonb not null default '{}'::jsonb,
-  created_by           uuid references profiles(id) on delete set null,
+  created_by           text references profiles(id) on delete set null,
   created_at           timestamptz not null default now()
 );
 
@@ -254,7 +267,7 @@ create table safety_files (
   site_project_name    text,
   included_document_ids jsonb not null default '[]'::jsonb,  -- ordered [{kind:'generated'|'evidence', id, toc_title}]
   final_pdf_url        text,
-  compiled_by          uuid references profiles(id) on delete set null,
+  compiled_by          text references profiles(id) on delete set null,
   compiled_at          timestamptz not null default now()
 );
 

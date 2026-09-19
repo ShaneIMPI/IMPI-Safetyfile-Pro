@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { supabase, isConfigured } from '../lib/supabase.js'
+import { neonClient, isConfigured } from '../lib/neon.js'
 import { useQuery } from '../hooks/useQuery.js'
 import { Spinner, ErrorBanner } from '../components/ui.jsx'
 import { fmtDate, isExpired, daysUntil } from '../lib/format.js'
@@ -7,16 +7,16 @@ import { fmtDate, isExpired, daysUntil } from '../lib/format.js'
 async function loadDashboard() {
   const counts = {}
   for (const t of ['clients', 'audits', 'generated_documents', 'evidence_documents', 'safety_files']) {
-    const { count } = await supabase.from(t).select('*', { count: 'exact', head: true })
+    const { count } = await neonClient.from(t).select('*', { count: 'exact', head: true })
     counts[t] = count ?? 0
   }
-  const { data: openAudits } = await supabase
+  const { data: openAudits } = await neonClient
     .from('audits').select('id, audit_date, overall_score, clients(company_name), checklists(name)')
     .eq('status', 'in_progress').order('audit_date', { ascending: false }).limit(8)
-  const { data: pendingEvidence } = await supabase
+  const { data: pendingEvidence } = await neonClient
     .from('evidence_documents').select('id, document_ref, title, issuing_body, client_id, clients(company_name)')
     .eq('status', 'pending_review').limit(10)
-  const { data: expiring } = await supabase
+  const { data: expiring } = await neonClient
     .from('evidence_documents').select('id, document_ref, title, expiry_date, clients(company_name)')
     .eq('status', 'accepted').not('expiry_date', 'is', null).order('expiry_date').limit(20)
   return { counts, openAudits: openAudits ?? [], pendingEvidence: pendingEvidence ?? [], expiring: expiring ?? [] }
@@ -30,9 +30,9 @@ export default function Dashboard() {
       <>
         <header><h1>Dashboard</h1></header>
         <div className="notice">
-          Connect Supabase to get started — see <span className="mono">README.md</span>. Set{' '}
-          <span className="mono">VITE_SUPABASE_URL</span> and <span className="mono">VITE_SUPABASE_ANON_KEY</span>,
-          run the migrations in <span className="mono">supabase/migrations</span>, then reload.
+          Connect Neon to get started — see <span className="mono">README.md</span>. Set{' '}
+          <span className="mono">VITE_NEON_DATA_API_URL</span> and <span className="mono">VITE_NEON_AUTH_URL</span>,
+          run the migrations in <span className="mono">neon/migrations</span>, then reload.
         </div>
       </>
     )

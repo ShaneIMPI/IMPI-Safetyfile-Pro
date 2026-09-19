@@ -34,10 +34,14 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          # Supabase project values are injected from repo secrets at build time.
-          # Add these under Settings > Secrets and variables > Actions.
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          # Neon project values are injected from repo secrets at build time.
+          # Add these under Settings > Secrets and variables > Actions — see
+          # README.md step 5 for the exact list and where each value comes from.
+          VITE_NEON_DATA_API_URL: ${{ secrets.VITE_NEON_DATA_API_URL }}
+          VITE_NEON_AUTH_URL: ${{ secrets.VITE_NEON_AUTH_URL }}
+          VITE_NEON_FILE_FN_URL: ${{ secrets.VITE_NEON_FILE_FN_URL }}
+          VITE_NEON_AUDIT_FN_URL: ${{ secrets.VITE_NEON_AUDIT_FN_URL }}
+          VITE_NEON_PUBLIC_FILES_URL: ${{ secrets.VITE_NEON_PUBLIC_FILES_URL }}
 
       - uses: actions/upload-pages-artifact@v3
         with:

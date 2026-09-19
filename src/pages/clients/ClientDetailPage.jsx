@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { supabase, uploadFile } from '../../lib/supabase.js'
+import { neonClient, uploadFile } from '../../lib/neon.js'
 import { db } from '../../lib/db.js'
 import { useQuery, useAsyncAction } from '../../hooks/useQuery.js'
 import { Spinner, ErrorBanner, Field } from '../../components/ui.jsx'
@@ -11,7 +11,7 @@ async function loadClientBundle(id) {
   const [client, sectors, links, generated, evidence, files] = await Promise.all([
     db.client(id),
     db.sectors(),
-    supabase.from('client_sectors').select('sector_id').eq('client_id', id).then(({ data }) => data ?? []),
+    neonClient.from('client_sectors').select('sector_id').eq('client_id', id).then(({ data }) => data ?? []),
     db.generatedDocs(id),
     db.evidenceDocs(id),
     db.safetyFiles(id),
@@ -56,8 +56,8 @@ export default function ClientDetailPage() {
 
   async function toggleSector(sectorId, on) {
     await runAction(async () => {
-      if (on) await supabase.from('client_sectors').insert({ client_id: id, sector_id: sectorId })
-      else await supabase.from('client_sectors').delete().eq('client_id', id).eq('sector_id', sectorId)
+      if (on) await neonClient.from('client_sectors').insert({ client_id: id, sector_id: sectorId })
+      else await neonClient.from('client_sectors').delete().eq('client_id', id).eq('sector_id', sectorId)
       refetch()
     })
   }

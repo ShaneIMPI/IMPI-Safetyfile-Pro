@@ -1,0 +1,9 @@
+{
+  "name": "impi-audit-suggest-function",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "jose": "^5.9.6",
+    "pg": "^8.13.1"
+  }
+}

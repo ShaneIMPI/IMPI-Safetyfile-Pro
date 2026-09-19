@@ -1,9 +1,21 @@
 -- ===========================================================================
--- IMPI SafetyFile Pro — 0003 Row Level Security + Storage
+-- IMPI SafetyFile Pro — 0003 Row Level Security  (Neon Postgres)
 --
 -- Phase 1: every authenticated user is `staff` and gets full access.
 -- The `client` policies below are written now (scoped to profiles.client_id)
 -- so Phase 2 needs no rebuild — they are simply dormant until client users exist.
+--
+-- NEON NOTE: file storage (logos / uploads / evidence / generated / safety-files)
+-- is NOT set up here. Neon Object Storage has no Postgres-visible `storage`
+-- schema and no per-object or per-folder policy grammar (bucket access is only
+-- "private" or "public_read", set on the bucket itself, not via SQL) — so
+-- there is nothing equivalent to Supabase's storage.objects RLS to port.
+-- Authorization for private files is enforced instead by the `file-access`
+-- Neon Function (neon/functions/file-access), which checks is_staff() / a
+-- client's own client_id against Postgres before minting a scoped, short-lived
+-- URL. See DECISIONS.md addendum 2 for the full reasoning. Create the buckets
+-- themselves via the Neon CLI/console per README.md step 4 (logos =
+-- public_read, everything else = private).
 -- ===========================================================================
 
 -- View respects underlying table RLS.
@@ -28,14 +40,18 @@ begin
 end $$;
 
 -- --- Profiles: a user can always read/update their own row ---------------
+-- (Insert is handled entirely by the SECURITY DEFINER ensure_profile() in
+-- 0002_functions.sql, which bypasses RLS as the owning role — no insert
+-- policy is needed or wanted here, since it must never accept a client-
+-- supplied id.)
 drop policy if exists own_profile_select on profiles;
 create policy own_profile_select on profiles
-  for select to authenticated using (id = auth.uid());
+  for select to authenticated using (id = auth.user_id());
 
 drop policy if exists own_profile_update on profiles;
 create policy own_profile_update on profiles
-  for update to authenticated using (id = auth.uid())
-  with check (id = auth.uid() and role = (select role from profiles where id = auth.uid()));
+  for update to authenticated using (id = auth.user_id())
+  with check (id = auth.user_id() and role = (select role from profiles where id = auth.user_id()));
 
 -- --- Phase-2 client-role read scoping (dormant until client users exist) --
 drop policy if exists client_read_own on clients;
@@ -77,46 +93,3 @@ begin
     execute format('create policy anyauth_read on %I for select to authenticated using (true)', t);
   end loop;
 end $$;
-
--- ===========================================================================
--- Storage buckets
--- ===========================================================================
-insert into storage.buckets (id, name, public)
-values
-  ('logos',        'logos',        true),   -- client logos; embedded in generated docs
-  ('uploads',      'uploads',      false),  -- client-supplied safety files being audited
-  ('evidence',     'evidence',     false),  -- third-party certificates/evidence
-  ('generated',    'generated',    false),  -- generated .docx / .pdf
-  ('safety-files', 'safety-files', false)   -- final assembled PDFs
-on conflict (id) do nothing;
-
--- Logos: public read, staff write.
-drop policy if exists logos_read on storage.objects;
-create policy logos_read on storage.objects
-  for select using (bucket_id = 'logos');
-drop policy if exists logos_write on storage.objects;
-create policy logos_write on storage.objects
-  for all to authenticated
-  using (bucket_id = 'logos' and is_staff())
-  with check (bucket_id = 'logos' and is_staff());
-
--- Private buckets: staff full access.
-do $$
-declare b text;
-begin
-  foreach b in array array['uploads','evidence','generated','safety-files'] loop
-    execute format('drop policy if exists %I on storage.objects', b || '_staff_all');
-    execute format(
-      'create policy %I on storage.objects for all to authenticated using (bucket_id = %L and is_staff()) with check (bucket_id = %L and is_staff())',
-      b || '_staff_all', b, b);
-  end loop;
-end $$;
-
--- Phase-2: a client user may upload into evidence/<their-client-id>/...
-drop policy if exists evidence_client_upload on storage.objects;
-create policy evidence_client_upload on storage.objects
-  for insert to authenticated
-  with check (
-    bucket_id = 'evidence'
-    and (storage.foldername(name))[1] = current_client_id()::text
-  );

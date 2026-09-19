@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { supabase, uploadFile } from '../../lib/supabase.js'
+import { neonClient, uploadFile } from '../../lib/neon.js'
 import { db } from '../../lib/db.js'
 import { useAuth } from '../../auth/AuthProvider.jsx'
 import { useQuery, useAsyncAction } from '../../hooks/useQuery.js'
@@ -69,9 +69,9 @@ function NewAuditModal({ onClose, onCreated }) {
         await db.update('audits', audit.id, { uploaded_file_url: url })
       }
       // Seed audit_results with one row per checklist item.
-      const { data: items } = await supabase.from('checklist_items').select('id').eq('checklist_id', checklistId)
+      const { data: items } = await neonClient.from('checklist_items').select('id').eq('checklist_id', checklistId)
       if (items?.length) {
-        await supabase.from('audit_results').insert(items.map((it) => ({ audit_id: audit.id, checklist_item_id: it.id })))
+        await neonClient.from('audit_results').insert(items.map((it) => ({ audit_id: audit.id, checklist_item_id: it.id })))
       }
       onCreated()
       navigate(`/audits/${audit.id}`)

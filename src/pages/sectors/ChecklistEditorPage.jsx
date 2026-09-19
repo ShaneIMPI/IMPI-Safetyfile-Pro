@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { supabase } from '../../lib/supabase.js'
+import { neonClient } from '../../lib/neon.js'
 import { db } from '../../lib/db.js'
 import { useQuery, useAsyncAction } from '../../hooks/useQuery.js'
 import { Spinner, ErrorBanner, Modal, Field, ConfirmButton } from '../../components/ui.jsx'
 
 async function load(id) {
   const [checklist, items, templates] = await Promise.all([
-    supabase.from('checklists').select('*, sectors(name)').eq('id', id).single().then(({ data }) => data),
+    neonClient.from('checklists').select('*, sectors(name)').eq('id', id).single().then(({ data }) => data),
     db.checklistItems(id),
     db.templates({ activeOnly: true }),
   ])

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { supabase, isConfigured } from '../lib/supabase.js'
+import { authClient, isConfigured } from '../lib/neon.js'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -14,14 +14,16 @@ export default function LoginPage() {
     setErr(null); setMsg(null); setBusy(true)
     try {
       if (mode === 'magic') {
-        const { error } = await supabase.auth.signInWithOtp({
-          email,
-          options: { emailRedirectTo: window.location.origin + window.location.pathname },
+        // Requires the "magic link" plugin to be enabled on this Neon Auth
+        // project (Neon console > Auth > Sign-in methods). If it isn't
+        // enabled, this call fails — use the password tab instead.
+        const { error } = await authClient.signIn.magicLink({
+          email, callbackURL: window.location.origin + window.location.pathname,
         })
         if (error) throw error
         setMsg('Check your email for a sign-in link.')
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        const { error } = await authClient.signIn.email({ email, password })
         if (error) throw error
       }
     } catch (e2) {
@@ -43,8 +45,8 @@ export default function LoginPage() {
 
         {!isConfigured && (
           <div className="error-banner">
-            Supabase is not configured. Set <span className="mono">VITE_SUPABASE_URL</span> and{' '}
-            <span className="mono">VITE_SUPABASE_ANON_KEY</span> (see README).
+            Neon is not configured. Set <span className="mono">VITE_NEON_DATA_API_URL</span> and{' '}
+            <span className="mono">VITE_NEON_AUTH_URL</span> (see README).
           </div>
         )}
 
