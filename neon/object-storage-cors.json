@@ -1,12 +1,14 @@
-[
-  {
-    "AllowedOrigins": [
-      "https://shaneimpi.github.io",
-      "http://localhost:5173"
-    ],
-    "AllowedMethods": ["GET", "PUT", "HEAD"],
-    "AllowedHeaders": ["*"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3600
-  }
-]
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": [
+        "https://shaneimpi.github.io",
+        "http://localhost:5173"
+      ],
+      "AllowedMethods": ["GET", "PUT", "HEAD"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["ETag"],
+      "MaxAgeSeconds": 3600
+    }
+  ]
+}

@@ -27,13 +27,28 @@ addendum 2 for the full reasoning).
 
 1. Create a project at [neon.com](https://neon.com) (free plan). Pick a region
    close to South Africa if offered (Frankfurt/EU is the closest current option).
-2. Neon Console → **SQL Editor**. Paste and run each file **in order**:
-   - `neon/migrations/0001_schema.sql`
-   - `neon/migrations/0002_functions.sql`
-   - `neon/migrations/0003_rls.sql`
-   - `neon/migrations/0004_seed.sql` (safe to skip/re-run — it self-skips if data exists)
-   - `neon/migrations/0005_evidence_files.sql`
-   - `neon/migrations/0006_grants.sql`
+2. Run each file **in order** against the database. **Prefer `psql` over
+   pasting into the Console's SQL Editor** — some of these files are long
+   enough that a manual copy-paste has silently truncated mid-file more than
+   once in practice, leaving later statements (a whole file's worth, in one
+   case) never applied with no error shown. `psql` runs the whole file as one
+   unit and stops loudly on a real error instead:
+   ```bash
+   CONN=$(neonctl connection-string <branch> --project-id <id> --role-name neondb_owner --pooled)
+   for f in neon/migrations/000{1,2,3,4,5,6}*.sql; do
+     psql "$CONN" -v ON_ERROR_STOP=1 -f "$f" || { echo "FAILED at $f"; break; }
+   done
+   ```
+   (`--role-name neondb_owner` matters — that's the admin role with DDL rights;
+   the Data API's own `authenticated` role deliberately can't run any of this.)
+3. **Verify it actually landed**, not just that no command errored:
+   ```bash
+   psql "$CONN" -c "select count(*) from pg_policies;"                    # expect 36
+   psql "$CONN" -c "select count(*) from pg_proc where pronamespace='public'::regnamespace and proname !~ '^(armor|crypt|dearmor|decrypt|digest|encrypt|fips_mode|gen_random_bytes|gen_salt|hmac|pgp_)';"  # expect 12 (incl. gen_random_uuid)
+   psql "$CONN" -c "select count(*) from information_schema.role_table_grants where grantee='authenticated';"  # expect 85
+   ```
+   If any of these are lower than expected, re-run the migration files listed
+   above — they're all idempotent, safe to run again.
 
 ### 1.2 Turn on the Data API + Neon Auth
 
@@ -50,61 +65,109 @@ addendum 2 for the full reasoning).
 
 ### 1.3 Create the Object Storage buckets
 
-Neon Console → your project → **Object Storage** (or `neon buckets create` if
-you're using the CLI). Create five buckets exactly named:
+The CLI below (`neonctl`, `npm i -g neonctl`, then `neonctl auth`) is what was
+actually used to set this project up — every command here has been run for
+real against this project, not just written from docs. The Console has
+equivalent screens under **Object Storage** if you'd rather click through it.
 
-| Bucket | Access |
-|---|---|
-| `logos` | **public_read** |
-| `uploads` | private |
-| `evidence` | private |
-| `generated` | private |
-| `safety-files` | private |
+```bash
+export NEON_API_KEY=nak_live_...           # Console > Account settings > API Keys
+PROJECT=steep-fog-58474739
+BRANCH=br-orange-waterfall-b2bcgbss
 
-Copy the **public URL** shown for the `logos` bucket — that's
-`VITE_NEON_PUBLIC_FILES_URL`. Also generate an **Object Storage access key**
-(Console → Object Storage → Access keys) — you'll need it in step 1.4.
+neonctl buckets create logos        --access-level public_read --project-id $PROJECT --branch $BRANCH
+neonctl buckets create uploads      --project-id $PROJECT --branch $BRANCH   # private is the default
+neonctl buckets create evidence     --project-id $PROJECT --branch $BRANCH
+neonctl buckets create generated    --project-id $PROJECT --branch $BRANCH
+neonctl buckets create safety-files --project-id $PROJECT --branch $BRANCH
+```
+
+`VITE_NEON_PUBLIC_FILES_URL` is `https://<your-s3-endpoint>/logos` — get the
+endpoint with `neonctl api "/projects/$PROJECT/branches/$BRANCH/storage"`
+(look for `s3_endpoint`).
 
 **Then set CORS on all five buckets — do not skip this.** Uploads and file
 previews work by the browser talking to the bucket directly with a short-lived
 signed link (that's what `file-access` mints). Without a CORS rule allowing
 your site's origin, every one of those browser requests is silently blocked
-and uploads will fail. A ready-made policy is in
-`neon/object-storage-cors.json` — apply it via whichever of these your Neon
-Console offers first:
+and uploads will fail. A ready-made policy is in `neon/object-storage-cors.json`.
 
-- Console → Object Storage → bucket → **CORS** (if there's a settings tab for it), or
-- the AWS CLI pointed at your Neon endpoint, once per bucket:
-  ```bash
-  aws s3api put-bucket-cors --bucket logos \
-    --cors-configuration file://neon/object-storage-cors.json \
-    --endpoint-url $AWS_ENDPOINT_URL_S3
-  ```
-  (repeat for `uploads`, `evidence`, `generated`, `safety-files`; the access
-  key from above needs to be set as your AWS CLI credentials first). If you
-  ever change the GitHub Pages URL or add a custom domain, add it to the
-  `AllowedOrigins` list in that file and re-apply.
+1. Issue a scoped credential for this (Object Storage's own S3-style
+   credentials — separate from your Neon API key and from `DATABASE_URL`):
+   ```bash
+   neonctl credentials create --project-id $PROJECT --branch $BRANCH \
+     --name cors-setup --scope storage:read --scope storage:write
+   ```
+   This prints a `token_id` and an `s3_secret_access_key` **once** — save both.
+   Counter-intuitively, **`token_id` is the S3 access key ID** (not the
+   `api_token` field the same output also shows — confirmed by testing both;
+   only `token_id` authenticates against the S3 endpoint).
+2. Apply it to all five buckets (the endpoint needs `--region` and
+   `force_path_style` — confirmed by querying `.../branches/$BRANCH/storage`
+   directly, which returns `"force_path_style": true`; without setting the
+   equivalent `s3.addressing_style = path` in your AWS CLI config, every call
+   fails):
+   ```bash
+   export AWS_ACCESS_KEY_ID=<the token_id above>
+   export AWS_SECRET_ACCESS_KEY=<the s3_secret_access_key above>
+   aws configure set default.s3.addressing_style path
+   ENDPOINT="https://$BRANCH.storage.c-6.eu-central-1.aws.neon.tech"   # from step above, yours will differ
+
+   for b in logos uploads evidence generated safety-files; do
+     aws s3api put-bucket-cors --bucket "$b" \
+       --cors-configuration file://neon/object-storage-cors.json \
+       --endpoint-url "$ENDPOINT" --region eu-central-1
+   done
+   ```
+3. Verify it actually took (don't trust a silent success):
+   ```bash
+   aws s3api get-bucket-cors --bucket logos --endpoint-url "$ENDPOINT" --region eu-central-1
+   ```
+   If you ever change the GitHub Pages URL or add a custom domain, add it to
+   the `AllowedOrigins` list in `neon/object-storage-cors.json` and re-apply.
 
 ### 1.4 Deploy the two Neon Functions
 
-These live in `neon/functions/audit-suggest/` and `neon/functions/file-access/`.
-Neon Functions are new enough that the exact deploy command may differ slightly
-from what's below — the Neon Console's **Functions** section has a "deploy a
-function" flow with instructions matched to your account; follow that if it
-doesn't match exactly.
+Function slugs are restricted to **1-20 lowercase letters and digits — no
+hyphens**, so the deployed names are `fileaccess` and `auditsuggest` (the
+repo folders keep the hyphenated names; only the deployed slug is different).
+Each function needs its own dependencies installed once before deploying
+(the bundler won't fetch them for you):
 
-1. Neon Console → your project → **Functions** → create a function named
-   `file-access`, pointing at `neon/functions/file-access/` in this repo (it
-   has its own `package.json` with the two dependencies it needs).
-2. Set its environment variables (Functions → `file-access` → Environment
-   variables): `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
-   `AWS_ENDPOINT_URL_S3`, `AWS_REGION` — the Object Storage access key from
-   step 1.3. `DATABASE_URL` / `NEON_AUTH_JWKS_URL` / `NEON_AUTH_BASE_URL` should
-   already be there automatically; if the function's logs show it can't find
-   one of those four, add it manually from the connection details Neon shows you.
-3. Repeat for a function named `audit-suggest`, pointing at
-   `neon/functions/audit-suggest/`. This one is optional — see step 1.6.
-4. Copy each function's URL — `VITE_NEON_FILE_FN_URL` and `VITE_NEON_AUDIT_FN_URL`.
+```bash
+cd neon/functions/file-access && npm install && cd ../../..
+cd neon/functions/audit-suggest && npm install && cd ../../..
+
+neonctl function deploy fileaccess \
+  --project-id $PROJECT --branch $BRANCH \
+  --src neon/functions/file-access --runtime nodejs24 \
+  --env AWS_ACCESS_KEY_ID=<the storage credential's token_id from 1.3> \
+  --env AWS_SECRET_ACCESS_KEY=<its s3_secret_access_key> \
+  --env AWS_ENDPOINT_URL_S3="$ENDPOINT" \
+  --env AWS_REGION=eu-central-1
+
+neonctl function deploy auditsuggest \
+  --project-id $PROJECT --branch $BRANCH \
+  --src neon/functions/audit-suggest --runtime nodejs24
+  # add --env ANTHROPIC_API_KEY=sk-ant-... here if you want AI hints — see 1.6
+```
+
+`DATABASE_URL` / `NEON_AUTH_JWKS_URL` / `NEON_AUTH_BASE_URL` are genuinely
+auto-injected — confirmed by calling the deployed function with no auth header
+and getting back a clean `{"error":"unauthorised"}` rather than a 500, which
+means JWT verification ran successfully.
+
+Each deploy prints an **Invocation Url** — those are `VITE_NEON_FILE_FN_URL`
+and `VITE_NEON_AUDIT_FN_URL`. Verify each one actually works before moving on:
+
+```bash
+curl -i -X OPTIONS "<invocation url>" -H "Origin: https://<you>.github.io"
+# expect: HTTP/2 204 with access-control-allow-* headers present
+
+curl -i -X POST "<invocation url>" -H "content-type: application/json" -d '{}'
+# fileaccess expects: 401 {"error":"unauthorised"}
+# auditsuggest expects: 200 {"disabled":true,...} if ANTHROPIC_API_KEY isn't set yet, else 400 (bad body)
+```
 
 ### 1.5 Local development
 

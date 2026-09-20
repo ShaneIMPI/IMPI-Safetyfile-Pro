@@ -63,6 +63,14 @@ function s3() {
   return new S3Client({
     region: process.env.AWS_REGION,
     endpoint: process.env.AWS_ENDPOINT_URL_S3,
+    // Confirmed required by querying this project's actual branch storage
+    // state directly (GET .../branches/{id}/storage returned
+    // "force_path_style": true) rather than assumed: Neon's S3-compatible
+    // endpoint expects the bucket name in the URL path
+    // (endpoint/bucket/key), not virtual-hosted style (bucket.endpoint/key),
+    // which is the AWS SDK's default for anything that isn't a literal
+    // *.amazonaws.com host.
+    forcePathStyle: true,
     credentials: {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID,
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
