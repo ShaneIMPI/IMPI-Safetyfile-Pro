@@ -33,6 +33,7 @@ addendum 2 for the full reasoning).
    - `neon/migrations/0003_rls.sql`
    - `neon/migrations/0004_seed.sql` (safe to skip/re-run — it self-skips if data exists)
    - `neon/migrations/0005_evidence_files.sql`
+   - `neon/migrations/0006_grants.sql`
 
 ### 1.2 Turn on the Data API + Neon Auth
 

@@ -20,8 +20,20 @@
 
 -- View respects underlying table RLS.
 alter view document_control_register set (security_invoker = on);
+-- A view is its own relation and needs its own SELECT grant regardless of
+-- security_invoker — see the grants note below.
+grant select on document_control_register to authenticated;
 
--- Helper: enable RLS + a blanket staff-all policy on a table.
+-- "permission denied for table X" is a different failure from RLS filtering
+-- rows: it fires when a role has no base GRANT on the table at all, before
+-- Postgres ever evaluates a policy. Supabase auto-applies this as part of its
+-- RLS tooling; on Neon it has to be done explicitly, so every table below
+-- gets both the grant and the policy in the same loop rather than relying on
+-- a Neon Console checkbox ("grant public schema access") that may or may not
+-- have been ticked.
+grant usage on schema public to authenticated;
+
+-- Helper: enable RLS + a blanket staff-all policy + the base grant on a table.
 do $$
 declare t text;
 begin
@@ -33,6 +45,7 @@ begin
     'generated_documents','questionnaire_responses','safety_files','document_counters'
   ] loop
     execute format('alter table %I enable row level security', t);
+    execute format('grant select, insert, update, delete on %I to authenticated', t);
     execute format('drop policy if exists staff_all on %I', t);
     execute format(
       'create policy staff_all on %I for all to authenticated using (is_staff()) with check (is_staff())', t);

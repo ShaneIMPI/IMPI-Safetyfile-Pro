@@ -179,6 +179,64 @@ sign-in itself) rides on the parts confirmed above:
 
 ---
 
+## Addendum 3 (2026-09-20) — two live-environment bugs found post-deploy
+
+Both found on the real deployed app (not caught in local review, since neither
+reproduces without a real Neon project behind it), fixed as they surfaced.
+
+**3a. Startup crash after sign-in: `rpc(...).catch is not a function`.**
+`src/auth/AuthProvider.jsx`'s profile-bootstrap had a Supabase-migration
+leftover: `neonClient.rpc('ensure_profile', ...).catch(() => {})`. Confirmed by
+loading the actual installed `@neondatabase/neon-js` client and inspecting it
+directly (not assumed): `.rpc()` / `.from()` return a PostgREST query-builder,
+not a native `Promise` — thenable (works with `await`) but with no `.catch`
+method, so this threw on every sign-in before `profileLoading` ever reset,
+hence the infinite "Starting…" spinner. Also confirmed the same way: this
+client never *throws* for a request-level failure (network error, RPC error,
+RLS/permission denial) — it always resolves with `{ data, error }`, the same
+convention as postgrest-js/supabase-js. A bare `try/catch` would have fixed the
+crash but silently missed a real failure returned in `error`, so the fix
+checks `error` explicitly: an `ensure_profile` failure is logged and tracked
+but non-fatal by itself (the profiles SELECT right after has its own
+fallback), *unless* the row genuinely never got created, in which case it's
+surfaced; the SELECT itself failing is treated as fatal (can't know the user's
+role) and now shows a real error card with retry/sign-out instead of hanging.
+`profileLoading` resets in a `finally` regardless of which step fails.
+
+**3b. `permission denied for table profiles` (surfaced only once 3a was
+fixed — the crash had been masking this the whole time).** Root cause: RLS
+*policies* only take effect once the executing role already has a base
+Postgres `GRANT` on the table — "permission denied" is Postgres's distinct
+error for a missing grant, fired before a policy is ever evaluated, not RLS
+filtering rows out. Supabase auto-applies these grants as part of its RLS
+tooling; that step never made it into `0003_rls.sql` / `0005_evidence_files.sql`
+when they were adapted for Neon in Addendum 2 — the policies themselves were
+already correct (confirmed: they already target `authenticated`, the same role
+name I'd verified earlier straight from Neon's Data API docs), only the base
+grants were missing. Fixed in two places:
+- `0003_rls.sql` and `0005_evidence_files.sql` now grant
+  `select, insert, update, delete` on every table in the same loop/place that
+  already enables RLS and creates the policy, plus `grant usage on schema
+  public to authenticated` and `grant select on document_control_register`
+  (a view is its own relation and needs its own grant even with
+  `security_invoker` on) — so a *future* fresh install never depends on
+  ticking the Neon Console's "grant public schema access" checkbox at all.
+- **`0006_grants.sql`** — a small, purely additive, idempotent migration with
+  just the grant statements, for Shane's *already-provisioned* database to run
+  immediately without re-running the larger 0003/0005 files. Safe to run
+  alongside the now-patched 0003/0005 too; plain `GRANT` statements don't
+  conflict with each other.
+- Audited every table in the schema for this same gap while in there (per the
+  addendum's own instruction) rather than fixing `profiles` alone — the full
+  list (all 20 original tables + `evidence_document_files` + the register
+  view) is in `0006_grants.sql`.
+
+Not yet independently verified against the live database (no Neon credentials
+in this environment as of this addendum — see Blockers below); Shane needs to
+run `0006_grants.sql` and confirm sign-in reaches the dashboard.
+
+---
+
 ## Blockers — need Shane / IMPI to proceed
 
 - **B1. Neon project + Data API + Auth + Object Storage + Functions.**

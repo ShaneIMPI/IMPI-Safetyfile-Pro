@@ -30,6 +30,9 @@ create index if not exists evidence_document_files_parent_idx
 
 -- --- RLS (mirrors evidence_documents) ---------------------------------
 alter table evidence_document_files enable row level security;
+-- Base grant, not just the policy — see 0003_rls.sql's note on
+-- "permission denied for table X" being a different failure from RLS.
+grant select, insert, update, delete on evidence_document_files to authenticated;
 
 drop policy if exists staff_all on evidence_document_files;
 create policy staff_all on evidence_document_files
