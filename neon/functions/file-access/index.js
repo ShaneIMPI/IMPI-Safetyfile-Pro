@@ -70,8 +70,19 @@ function s3() {
   })
 }
 
+// The app is served from GitHub Pages, a different origin from this Function
+// — every call is cross-origin, so CORS headers are required on every
+// response (including errors) and the preflight OPTIONS request must be
+// answered directly, or the browser silently blocks the whole request before
+// it ever reaches the handler logic below.
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
 function json(body, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  return new Response(JSON.stringify(body), { status, headers: { ...CORS, 'content-type': 'application/json' } })
 }
 
 async function authorize(bucket, path, request) {
@@ -97,6 +108,7 @@ async function authorize(bucket, path, request) {
 
 export default {
   async fetch(request) {
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS })
     if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
 
     let body

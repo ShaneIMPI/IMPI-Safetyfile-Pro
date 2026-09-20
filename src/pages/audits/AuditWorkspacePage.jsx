@@ -147,7 +147,7 @@ export default function AuditWorkspacePage() {
         </button>
       </div>
 
-      {aiState === 'disabled' && <div className="notice">AI suggestions are not configured (no <span className="mono">ANTHROPIC_API_KEY</span> on the Edge Function). Review every item manually — see DECISIONS.md item 2.</div>}
+      {aiState === 'disabled' && <div className="notice">AI suggestions are not configured (no <span className="mono">ANTHROPIC_API_KEY</span> on the audit-suggest Function). Review every item manually — see DECISIONS.md item 2.</div>}
       {aiState === 'done' && <div className="notice">AI suggestions loaded. Each is a hint only — nothing counts toward the score until you press <strong>Confirm</strong>.</div>}
       {reportUrl && <div className="notice">Audit report generated. <a href={reportUrl} target="_blank" rel="noreferrer">Open stored copy</a></div>}
 

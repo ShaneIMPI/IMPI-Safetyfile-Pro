@@ -117,6 +117,20 @@ this stack is.
      `refreshFileUrl()` call (exported from `src/lib/neon.js`, not yet wired
      into any page since no page hit this limitation in practice under Supabase
      either).
+   - **Found and fixed during a follow-up review, before Shane hit it:** the two
+     Neon Functions had no CORS handling at all (dropped by accident during the
+     Deno→Node port — the original Supabase Edge Function explicitly had it).
+     Since the app runs on a different origin (GitHub Pages) than the
+     Functions, every call would have been silently blocked by the browser.
+     Both now answer the CORS preflight and set the headers on every response.
+   - **A second, more fundamental gap the same review surfaced:** presigned S3
+     uploads/downloads are direct browser↔bucket requests, which need CORS
+     configured **on the Object Storage buckets themselves** — a setting this
+     app's code cannot express (it's not a Postgres migration or a Function,
+     it's a property of the bucket). Without it, every upload in the app would
+     fail. This is NOT optional the way item 1 in "Confirm these" below is —
+     it's a required manual step, now called out explicitly in README.md §1.3
+     with a ready-made policy at `neon/object-storage-cors.json`.
 4. **The AI-hints function.** `neon/functions/audit-suggest` replaces the
    Supabase Edge Function 1:1 (same prompt, same Anthropic call, same
    never-auto-finalizes behaviour) — ported from Deno's `Deno.serve()` handler

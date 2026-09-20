@@ -64,6 +64,26 @@ Copy the **public URL** shown for the `logos` bucket — that's
 `VITE_NEON_PUBLIC_FILES_URL`. Also generate an **Object Storage access key**
 (Console → Object Storage → Access keys) — you'll need it in step 1.4.
 
+**Then set CORS on all five buckets — do not skip this.** Uploads and file
+previews work by the browser talking to the bucket directly with a short-lived
+signed link (that's what `file-access` mints). Without a CORS rule allowing
+your site's origin, every one of those browser requests is silently blocked
+and uploads will fail. A ready-made policy is in
+`neon/object-storage-cors.json` — apply it via whichever of these your Neon
+Console offers first:
+
+- Console → Object Storage → bucket → **CORS** (if there's a settings tab for it), or
+- the AWS CLI pointed at your Neon endpoint, once per bucket:
+  ```bash
+  aws s3api put-bucket-cors --bucket logos \
+    --cors-configuration file://neon/object-storage-cors.json \
+    --endpoint-url $AWS_ENDPOINT_URL_S3
+  ```
+  (repeat for `uploads`, `evidence`, `generated`, `safety-files`; the access
+  key from above needs to be set as your AWS CLI credentials first). If you
+  ever change the GitHub Pages URL or add a custom domain, add it to the
+  `AllowedOrigins` list in that file and re-apply.
+
 ### 1.4 Deploy the two Neon Functions
 
 These live in `neon/functions/audit-suggest/` and `neon/functions/file-access/`.
