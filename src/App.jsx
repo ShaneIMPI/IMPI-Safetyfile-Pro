@@ -20,10 +20,32 @@ const AuditWorkspacePage = lazy(() => import('./pages/audits/AuditWorkspacePage.
 const FinalAssemblyPage = lazy(() => import('./pages/assembly/FinalAssemblyPage.jsx'))
 
 export default function App() {
-  const { session, loading, isStaff } = useAuth()
+  const { session, loading, isStaff, profile, profileError, refreshProfile, signOut } = useAuth()
 
   if (loading) return <Spinner label="Starting IMPI SafetyFile Pro…" />
   if (!session) return <LoginPage />
+
+  // Signed in, but we could not determine who this user is (a real failure,
+  // not just "not staff") — show that plainly instead of guessing they're a
+  // non-staff account, and instead of hanging on the spinner forever.
+  if (!profile && profileError) {
+    return (
+      <div className="login-wrap">
+        <div className="panel login-card">
+          <h2>Couldn't load your account</h2>
+          <p className="muted">
+            Signed in, but the app couldn't read your profile. This is usually transient — try again,
+            or sign out and back in if it keeps happening.
+          </p>
+          <div className="error-banner">{profileError.message || String(profileError)}</div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button onClick={refreshProfile}>Try again</button>
+            <button className="btn-secondary" onClick={signOut}>Sign out</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (!isStaff) {
     return (
