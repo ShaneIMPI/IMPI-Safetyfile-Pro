@@ -127,6 +127,42 @@ export default {
     }
 
     const { action, bucket, path, contentType, withReadUrl } = body || {}
+
+    // TEMPORARY DIAGNOSTIC (2026-09-22) — remove once the persistent
+    // "unauthorised" from a real signed-in session is root-caused. Confirms
+    // which env var NAMES this Function actually receives at runtime,
+    // without ever exposing a VALUE, and independently exercises jwtVerify
+    // against a caller-supplied token so the real jose failure reason
+    // (expired, wrong issuer, JWKS fetch failure, ...) is visible instead of
+    // being swallowed by verifyCaller's catch-and-return-null.
+    if (action === 'debug-env') {
+      const authHeader = request.headers.get('authorization') || ''
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+      let verify = { attempted: false }
+      if (token) {
+        verify.attempted = true
+        try {
+          const { payload } = await jwtVerify(token, getJwks(), { issuer: process.env.NEON_AUTH_BASE_URL })
+          verify.ok = true
+          verify.sub = payload.sub
+          verify.iss = payload.iss
+          verify.aud = payload.aud
+        } catch (err) {
+          verify.ok = false
+          verify.errorName = err?.name
+          verify.errorMessage = err?.message
+        }
+      }
+      return json({
+        envKeysPresent: Object.keys(process.env).filter((k) =>
+          /^(NEON_|DATABASE_URL|AWS_)/.test(k)),
+        jwksUrlSet: Boolean(process.env.NEON_AUTH_JWKS_URL),
+        authBaseUrlSet: Boolean(process.env.NEON_AUTH_BASE_URL),
+        databaseUrlSet: Boolean(process.env.DATABASE_URL),
+        verify,
+      })
+    }
+
     if (!action || !bucket || !path) return json({ error: 'action, bucket and path are required' }, 400)
 
     const auth = await authorize(bucket, path, request)
