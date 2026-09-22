@@ -521,8 +521,12 @@ once the real fix was deployed and confirmed — this addendum's fix is the
 permanent state, not the diagnostics that found it.
 
 Verified: `npm run build` passes; both Functions redeployed
-(`fileaccess`/4, `auditsuggest`/2). Awaiting Shane's confirmation that
-Document Builder generation now completes end-to-end.
+(`fileaccess`/4, `auditsuggest`/2). **Confirmed resolved** — queried
+`generated_documents` directly after Shane's retry and found three real
+rows created since the fix (Method Statement draft, Risk Assessment draft,
+Risk Assessment finalized), each with a genuine presigned storage URL and
+`generated_by` set to Shane's profile id. Both the draft and
+"Generate & finalize" paths work end-to-end.
 
 ---
 
