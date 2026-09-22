@@ -69,20 +69,27 @@ export const authClient = neonClient.auth
 export async function getAccessToken() {
   try {
     const res = await authClient.token()
-    // The endpoint's success shape for a *signed-in* call hasn't been directly
-    // observed yet (every check so far was necessarily unauthenticated, since
-    // this was diagnosed without real credentials) — Better Auth's JWT plugin
-    // conventionally returns `{ token: "<jwt>" }`, wrapped by this client as
-    // `{ data: { token }, error }`, so that's the primary read below, with a
-    // couple of plausible fallbacks. If uploads/AI hints still fail after this
-    // fix, log what `res` actually looks like and adjust the one line below.
+    // The endpoint's success shape for a *signed-in* call has not been
+    // directly observed yet — every check while diagnosing this was
+    // necessarily unauthenticated (no real credentials to test with; pulling
+    // a live session token from the database to test against was refused by
+    // this environment's own safety checks, correctly — that would mean
+    // materializing a real user's live session, not just reading config).
+    // TEMPORARY: logging the raw shape so it can be read once, from a real
+    // signed-in browser, then this whole console.info block comes back out.
+    console.info('[IMPI][diagnostic] authClient.token() resolved with:', JSON.stringify(res))
     const token = res?.data?.token ?? res?.token ?? (typeof res?.data === 'string' ? res.data : null)
     if (token) return token
+    console.error('[IMPI] authClient.token() succeeded but no token could be extracted from the response shape above.')
   } catch (err) {
     console.error('[IMPI] authClient.token() failed, falling back to session lookup:', err)
   }
   const { data } = await authClient.getSession()
-  return data?.session?.token ?? null
+  const fallback = data?.session?.token ?? null
+  if (!fallback) {
+    console.error('[IMPI] No access token available from either authClient.token() or getSession() — the request below will go out unauthenticated and the Function will correctly reject it.')
+  }
+  return fallback
 }
 
 async function callFunction(url, body) {
