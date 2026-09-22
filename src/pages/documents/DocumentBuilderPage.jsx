@@ -93,50 +93,68 @@ export default function DocumentBuilderPage() {
   const bespoke = template && ['RA', 'MS'].includes(template.type_code)
 
   async function generate({ finalize }) {
-    await runAction(async () => {
-      const gen = generatorFor(template.type_code)
-      const documentControl = {
-        documentRef: 'DRAFT', revision: 1, revisionDate: control.revision_date,
-        preparedBy: control.prepared_by, reviewedBy: control.reviewed_by, approvedBy: control.approved_by,
-        status: finalize ? 'Final' : control.status, siteProjectName: control.site_project_name,
-      }
-      const ctx = {
-        client, template, responses: { ...responses, site_project_name: control.site_project_name },
-        documentControl,
-        hazardRows: libRows, stepRows: libRows,
-      }
+    let row = null
+    try {
+      await runAction(async () => {
+        const gen = generatorFor(template.type_code)
+        const documentControl = {
+          documentRef: 'DRAFT', revision: 1, revisionDate: control.revision_date,
+          preparedBy: control.prepared_by, reviewedBy: control.reviewed_by, approvedBy: control.approved_by,
+          status: finalize ? 'Final' : control.status, siteProjectName: control.site_project_name,
+        }
+        const ctx = {
+          client, template, responses: { ...responses, site_project_name: control.site_project_name },
+          documentControl,
+          hazardRows: libRows, stepRows: libRows,
+        }
 
-      // Persist questionnaire responses.
-      const qr = await db.insert('questionnaire_responses', {
-        client_id: clientId, document_template_id: templateId,
-        responses, created_by: profile?.id ?? null,
+        // Persist questionnaire responses.
+        const qr = await db.insert('questionnaire_responses', {
+          client_id: clientId, document_template_id: templateId,
+          responses, created_by: profile?.id ?? null,
+        })
+
+        // Insert the generated_documents row first so the DB trigger assigns the real ref.
+        // Tracked in the outer `row` variable so a failure below (e.g. the
+        // upload) can clean this back up instead of leaving a numbered but
+        // fileless "draft" row behind — see the catch below.
+        row = await db.insert('generated_documents', {
+          client_id: clientId, document_template_id: templateId,
+          questionnaire_response_id: qr.id,
+          title: template.name, site_project_name: control.site_project_name,
+          prepared_by_name: control.prepared_by, reviewed_by_name: control.reviewed_by,
+          approved_by_name: control.approved_by, revision_date: control.revision_date,
+          status: finalize ? 'final' : 'draft', generated_by: profile?.id ?? null,
+        })
+
+        ctx.documentControl.documentRef = row.document_ref
+        ctx.documentControl.revision = row.revision
+
+        const { doc, filename } = await gen.build(ctx)
+        const blob = await docxBlob(doc)
+
+        const path = `${clientId}/${row.document_ref}.docx`
+        const { url } = await uploadFile('generated', path, new File([blob], filename, { type: blob.type }))
+        await db.update('generated_documents', row.id, { file_url: url })
+
+        // Also hand the .docx to the user immediately.
+        await saveDocx(doc, filename)
+
+        setResult({ ref: row.document_ref, url, filename })
       })
-
-      // Insert the generated_documents row first so the DB trigger assigns the real ref.
-      const row = await db.insert('generated_documents', {
-        client_id: clientId, document_template_id: templateId,
-        questionnaire_response_id: qr.id,
-        title: template.name, site_project_name: control.site_project_name,
-        prepared_by_name: control.prepared_by, reviewed_by_name: control.reviewed_by,
-        approved_by_name: control.approved_by, revision_date: control.revision_date,
-        status: finalize ? 'final' : 'draft', generated_by: profile?.id ?? null,
-      })
-
-      ctx.documentControl.documentRef = row.document_ref
-      ctx.documentControl.revision = row.revision
-
-      const { doc, filename } = await gen.build(ctx)
-      const blob = await docxBlob(doc)
-
-      const path = `${clientId}/${row.document_ref}.docx`
-      const { url } = await uploadFile('generated', path, new File([blob], filename, { type: blob.type }))
-      await db.update('generated_documents', row.id, { file_url: url })
-
-      // Also hand the .docx to the user immediately.
-      await saveDocx(doc, filename)
-
-      setResult({ ref: row.document_ref, url, filename })
-    })
+    } catch {
+      // runAction already logged this into genErr, shown via <ErrorBanner>
+      // above — caught again here only so a failed generation never surfaces
+      // as an unhandled promise rejection with nothing visible in the UI, and
+      // so the numbered-but-fileless row below can be cleaned up.
+      if (row) {
+        try {
+          await db.remove('generated_documents', row.id)
+        } catch (cleanupErr) {
+          console.error('[IMPI] Could not clean up the orphaned document row after a failed generation:', cleanupErr)
+        }
+      }
+    }
   }
 
   async function flagGap() {

@@ -319,6 +319,64 @@ the earlier full API key was rotated after a similar exposure.
 
 ---
 
+## Addendum 5 (2026-09-22) — fixed `getJWTToken is 404`, blocking every document upload
+
+**A different bug from the `ensure_profile` one, despite looking similar —
+confirmed, not assumed**, per this addendum's own instruction to check rather
+than assume the same fix covers both. `ensure_profile` (Addendum 3b/4) was a
+database grants/functions problem, fully independent of this. This one is
+purely client-side: `src/lib/neon.js`'s `getAccessToken()` — the helper every
+upload (`uploadFile`, used by Document Builder, Audit Report generation, Final
+Assembly, logos, evidence, and audit source files) and the AI-hints call go
+through to get a bearer token for the two custom Neon Functions — called
+`authClient.getJWTToken()`, which Addendum 2 justified from the installed
+package's own documented method for this. That documentation doesn't match
+what this specific managed Neon Auth instance actually serves.
+
+**Confirmed by reproducing it directly, not by re-reading docs a third time:**
+loaded the real client against the live Neon Auth URL, intercepted its
+`fetch` calls, and called each candidate method:
+- `authClient.getJWTToken()` → requests `GET /get-jwt-token` → **404** →
+  throws `AuthApiError: HTTP 404 Not Found` — the exact error and error class
+  from the bug report, reproduced outside the browser.
+- `authClient.token()` → requests `GET /token` → **401** (endpoint genuinely
+  exists, just correctly rejects a request with no session) — confirmed via
+  `GET .../branches/{id}/auth/plugins` too: no `jwt` plugin is listed as
+  configurable at all on this managed instance, consistent with the JWT
+  endpoint this package's docs assume simply not being exposed here.
+- Also confirmed *why* an earlier `typeof authClient.getJWTToken === 'function'`
+  guard gave false confidence: this client is a Proxy — `typeof` on *any*
+  property name returns `'function'`, whether or not a matching server route
+  exists. That check was removed rather than kept.
+
+Fixed: `getAccessToken()` now calls `authClient.token()`. The success-response
+shape (`{ token }`) is Better Auth's own JWT-plugin convention, not something
+observable without real credentials (every check above was necessarily
+unauthenticated) — if this needs a one-line adjustment once tested against a
+real signed-in session, that's the line to look at, not the method name.
+
+**Also fixed, per this addendum's item 4 (generation must never fail
+silently):** `DocumentBuilderPage`'s `generate()` and
+`AuditWorkspacePage`'s `generateReport()` both insert a numbered
+`generated_documents` row *before* the upload step. Neither was previously
+wrapped in anything beyond `runAction` (which sets the error state
+correctly — `<ErrorBanner>` was already there and should already have shown
+something) — but calling an `async` function directly as an `onClick` with no
+handling of the re-thrown rejection is exactly the kind of thing that produces
+console noise even when the UI *is* technically showing an error. Both now
+also delete the orphaned row on failure, so a failed generation doesn't burn a
+document number and leave a fileless "draft" row behind in the register.
+
+**Noted, not fixed (scope discipline — flagging, not doing it now):** this
+"bare async function passed straight to `onClick`" pattern exists in several
+other upload call sites too (client logo, evidence upload, audit source
+file) — they don't have the "orphaned numbered row" complication these two
+do, and `runAction` already surfaces their errors via `<ErrorBanner>`, so
+they're lower-priority than what this addendum asked for. Worth a pass later
+if the same unhandled-rejection console noise shows up for one of them.
+
+---
+
 ## Blockers — need Shane / IMPI to proceed
 
 - **B1. Neon project + Data API + Auth + Object Storage + Functions.**

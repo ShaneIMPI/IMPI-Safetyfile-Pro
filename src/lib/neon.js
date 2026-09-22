@@ -46,12 +46,40 @@ export const authClient = neonClient.auth
 // NOT used for neonClient's own `.from()`/`.rpc()` calls — those pick up the
 // session automatically since they're the same client. This is only for the
 // two custom Neon Functions below, which need a plain
-// `Authorization: Bearer <token>` header. getJWTToken() is documented in the
-// installed package's own README (not just inferred): "Returns JWT token:
-// authenticated session → anonymous token → null".
+// `Authorization: Bearer <token>` header.
+//
+// CORRECTED (2026-09-22): this used to call authClient.getJWTToken(), which
+// the package's own README documents as "Returns JWT token: authenticated
+// session → anonymous token → null". That documentation does not match this
+// project's actual Neon Auth instance — confirmed by intercepting the real
+// fetch calls the client makes: getJWTToken() requests GET /get-jwt-token,
+// which 404s here (this was the exact "AuthApiError: HTTP 404" breaking
+// Document Builder generation and any other caller of uploadFile()). A
+// `typeof authClient.getJWTToken === 'function'` guard never catches this,
+// because this client is a Proxy — EVERY property access returns a function,
+// whether or not a matching endpoint exists server-side, so that check gives
+// false confidence and was removed rather than kept as a guard.
+//
+// authClient.token() (GET /token) is the endpoint that actually exists on
+// this instance — confirmed the same way (intercepted fetch call, got a real
+// 401 Unauthorized with no session rather than a 404). If a future Neon Auth
+// version changes this again, don't re-add a typeof guard; re-verify with a
+// fetch interceptor the way this was diagnosed, not by trusting a method's
+// mere existence.
 export async function getAccessToken() {
-  if (typeof authClient.getJWTToken === 'function') {
-    return authClient.getJWTToken()
+  try {
+    const res = await authClient.token()
+    // The endpoint's success shape for a *signed-in* call hasn't been directly
+    // observed yet (every check so far was necessarily unauthenticated, since
+    // this was diagnosed without real credentials) — Better Auth's JWT plugin
+    // conventionally returns `{ token: "<jwt>" }`, wrapped by this client as
+    // `{ data: { token }, error }`, so that's the primary read below, with a
+    // couple of plausible fallbacks. If uploads/AI hints still fail after this
+    // fix, log what `res` actually looks like and adjust the one line below.
+    const token = res?.data?.token ?? res?.token ?? (typeof res?.data === 'string' ? res.data : null)
+    if (token) return token
+  } catch (err) {
+    console.error('[IMPI] authClient.token() failed, falling back to session lookup:', err)
   }
   const { data } = await authClient.getSession()
   return data?.session?.token ?? null

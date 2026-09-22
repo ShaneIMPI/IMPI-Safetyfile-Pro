@@ -96,31 +96,46 @@ export default function AuditWorkspacePage() {
     patchResult(itemId, { status, reviewed_by: profile?.id ?? null, reviewed_at: new Date().toISOString() })
 
   async function generateReport() {
-    await runAction(async () => {
-      const client = audit.clients
-      const row = await db.insert('generated_documents', {
-        client_id: audit.client_id,
-        document_template_id: (await templateIdByCode('AUD')),
-        audit_id: id, title: 'Safety File Audit Report',
-        site_project_name: audit.site_project_name || '',
-        prepared_by_name: profile?.full_name || '', status: 'draft', generated_by: profile?.id ?? null,
+    let row = null
+    try {
+      await runAction(async () => {
+        const client = audit.clients
+        row = await db.insert('generated_documents', {
+          client_id: audit.client_id,
+          document_template_id: (await templateIdByCode('AUD')),
+          audit_id: id, title: 'Safety File Audit Report',
+          site_project_name: audit.site_project_name || '',
+          prepared_by_name: profile?.full_name || '', status: 'draft', generated_by: profile?.id ?? null,
+        })
+        const results = merged.map((m) => ({
+          category: m.item.category, item_text: m.item.item_text, regulation_reference: m.item.regulation_reference,
+          severity_weight: m.item.severity_weight, status: m.result.status || 'not_reviewed',
+          reviewer_notes: m.result.reviewer_notes, action_required: m.result.action_required,
+          confirmed: Boolean(m.result.reviewed_at),
+        }))
+        const { doc, filename } = await auditReport.build({
+          client, audit: { ...audit, audited_by_name: profile?.full_name }, checklist: audit.checklists, results,
+          documentControl: { documentRef: row.document_ref, revision: row.revision, preparedBy: profile?.full_name, status: 'Draft' },
+        })
+        const blob = await docxBlob(doc)
+        const { url } = await uploadFile('generated', `${audit.client_id}/${row.document_ref}.docx`, new File([blob], filename, { type: blob.type }))
+        await db.update('generated_documents', row.id, { file_url: url })
+        await saveDocx(doc, filename)
+        setReportUrl(url)
       })
-      const results = merged.map((m) => ({
-        category: m.item.category, item_text: m.item.item_text, regulation_reference: m.item.regulation_reference,
-        severity_weight: m.item.severity_weight, status: m.result.status || 'not_reviewed',
-        reviewer_notes: m.result.reviewer_notes, action_required: m.result.action_required,
-        confirmed: Boolean(m.result.reviewed_at),
-      }))
-      const { doc, filename } = await auditReport.build({
-        client, audit: { ...audit, audited_by_name: profile?.full_name }, checklist: audit.checklists, results,
-        documentControl: { documentRef: row.document_ref, revision: row.revision, preparedBy: profile?.full_name, status: 'Draft' },
-      })
-      const blob = await docxBlob(doc)
-      const { url } = await uploadFile('generated', `${audit.client_id}/${row.document_ref}.docx`, new File([blob], filename, { type: blob.type }))
-      await db.update('generated_documents', row.id, { file_url: url })
-      await saveDocx(doc, filename)
-      setReportUrl(url)
-    })
+    } catch {
+      // runAction already logged this into actErr, shown via <ErrorBanner>
+      // above — caught again here only so a failure never surfaces as an
+      // unhandled promise rejection with nothing visible in the UI, and so a
+      // numbered-but-fileless row isn't left behind.
+      if (row) {
+        try {
+          await db.remove('generated_documents', row.id)
+        } catch (cleanupErr) {
+          console.error('[IMPI] Could not clean up the orphaned report row after a failed generation:', cleanupErr)
+        }
+      }
+    }
   }
 
   return (
