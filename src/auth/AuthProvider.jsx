@@ -19,22 +19,38 @@ export function AuthProvider({ children }) {
     setProfileLoading(true)
     setProfileError(null)
     try {
-      // First login for this user: create their own profile row. ensure_profile()
-      // is SECURITY DEFINER and reads auth.user_id() itself server-side, so a
-      // caller can only ever create/touch their OWN row (0002_functions.sql).
+      // First login for this user: create their own profile row.
       //
-      // IMPORTANT (confirmed by inspecting the installed client directly, not
-      // assumed): neonClient.rpc(...)/.from(...) never THROW for a request-level
-      // failure (network error, RPC error, RLS denial, ...) — they always
+      // CORRECTED (2026-09-22): this used to call neonClient.rpc('ensure_profile', ...),
+      // a SECURITY DEFINER function that read auth.user_id() itself server-side.
+      // That reliably failed on this project's live Data API with Postgres
+      // error 23502 ("null value in column id of relation profiles") —
+      // auth.user_id() evaluates NULL specifically through the RPC endpoint,
+      // even though it's proven reliable for ordinary .from() reads/writes
+      // elsewhere in this app. Confirmed via psql (policies/grants correct,
+      // pre-existing rows inserted fine under the same auth.user_id()) before
+      // concluding this was RPC-specific rather than a config bug — see
+      // neon/migrations/0007_profile_insert_policy.sql.
+      //
+      // Fixed by dropping the RPC call and using .from().upsert() instead,
+      // with a plain INSERT policy (own_profile_insert) that checks
+      // id = auth.user_id() server-side — the same "can only touch your own
+      // row" guarantee ensure_profile() gave, just via the reliable code path.
+      // ignoreDuplicates keeps this from clobbering a role an admin already
+      // set for an existing row.
+      //
+      // IMPORTANT: neonClient.rpc(...)/.from(...) never THROW for a
+      // request-level failure (network error, RLS denial, ...) — they always
       // resolve, with the failure in the returned `error` field, same
-      // convention as postgrest-js/supabase-js. So `.catch(...)` chained on the
-      // call is both wrong (the returned object isn't a real Promise and has no
-      // .catch method — this was the reported crash) and wouldn't have caught a
-      // real failure anyway. Check `error` explicitly instead.
-      const { error: rpcError } = await neonClient.rpc(
-        'ensure_profile', { p_full_name: user.name ?? user.email ?? null },
-      )
-      if (rpcError) console.error('[IMPI] ensure_profile failed:', rpcError)
+      // convention as postgrest-js/supabase-js. Check `error` explicitly
+      // rather than try/catch alone.
+      const { error: upsertError } = await neonClient
+        .from('profiles')
+        .upsert(
+          { id: user.id, full_name: user.name ?? user.email ?? null },
+          { onConflict: 'id', ignoreDuplicates: true },
+        )
+      if (upsertError) console.error('[IMPI] profile upsert failed:', upsertError)
 
       const { data, error: selectError } = await neonClient
         .from('profiles')
@@ -44,12 +60,12 @@ export function AuthProvider({ children }) {
       if (selectError) throw selectError
 
       setProfile(data ?? { id: user.id, role: 'staff', full_name: null })
-      // If ensure_profile failed AND there's still no row, the profile was
+      // If the upsert failed AND there's still no row, the profile was
       // genuinely never persisted — the fallback above lets the user into the
       // app, but every RLS check keyed on their profiles row will fail, so
       // this needs to be visible rather than a silent, confusing "access
       // denied everywhere" later.
-      if (rpcError && !data) setProfileError(rpcError)
+      if (upsertError && !data) setProfileError(upsertError)
     } catch (err) {
       // Couldn't even read the profile back — this one really is fatal to
       // rendering the app (we have no way to know the user's role), so it

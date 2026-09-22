@@ -398,6 +398,82 @@ do, and `runAction` already surfaces their errors via `<ErrorBanner>`, so
 they're lower-priority than what this addendum asked for. Worth a pass later
 if the same unhandled-rejection console noise shows up for one of them.
 
+## Addendum 6 (2026-09-22) — `ensure_profile` was never actually working on the live Data API; replaced RPC bootstrap with a direct insert
+
+A follow-up to Addendum 3b/4, not the same fix repeated. That addendum fixed
+missing base GRANTs on `profiles` (Postgres error "permission denied for
+table profiles"). This is a **different** Postgres error surfacing after
+that fix: `23502`, "null value in column 'id' of relation 'profiles'",
+`ensure_profile()` failing on every call. This means `auth.user_id()` — the
+function `ensure_profile()`, `is_staff()`, and every RLS policy read to know
+who's calling — evaluated **NULL** at the moment `ensure_profile()` ran.
+
+**Confirmed the RPC path specifically, not the app or the general
+auth setup, before writing any fix:**
+- Queried `profiles`, `questionnaire_responses`, and `pg_policies` directly
+  via `psql` — the policies and grants were correct, and rows had already
+  been inserted successfully under the exact same `auth.user_id()`-keyed
+  policies via ordinary `.from()` calls (a real client, real questionnaire
+  answers, real generated-document rows). That rules out a config/grants
+  bug and rules out `auth.user_id()` being broken in general.
+- The one call site that consistently failed was the **RPC** call —
+  `neonClient.rpc('ensure_profile', ...)`, `POST /rpc/ensure_profile` — while
+  `.from()` reads/writes on the very same tables, same session, same
+  request cycle, worked. That's a strong, specific signal that this managed
+  Neon Data API's RPC endpoint doesn't reliably carry `auth.user_id()`
+  context into the function body the way the table CRUD endpoints do — a
+  platform-level inconsistency between the two code paths, not a bug in
+  this project's SQL or app code.
+- Also confirmed directly (`node`, not assumed): the installed client's
+  `.from(...).upsert(row, { onConflict, ignoreDuplicates })` exists and
+  returns the same thenable `PostgrestFilterBuilder` `.from()`/`.rpc()`
+  already return, so it fits the existing "never throws, check `.error`"
+  handling already in place — no new failure-mode gap introduced.
+
+**Fixed by removing the RPC round-trip from this call site.**
+`ensure_profile()` was SECURITY DEFINER specifically so a client could only
+ever create/touch *its own* row — the function read `auth.user_id()`
+server-side rather than trusting a client-supplied id, which is why the
+original design (Addendum 2) deliberately left `profiles` with no INSERT
+policy at all (see the comment removed from `0003_rls.sql`). Since the
+`.from()` path is the one proven reliable here, that same guarantee is
+recreated as a plain RLS policy instead of a function:
+`neon/migrations/0007_profile_insert_policy.sql` adds
+`own_profile_insert on profiles for insert to authenticated with check (id
+= auth.user_id())` — a client can still only insert a row for themselves,
+because the check evaluates `auth.user_id()` server-side, not whatever id
+the client's request body claims. `src/auth/AuthProvider.jsx`'s
+`loadProfile()` now calls `.from('profiles').upsert({id, full_name}, {
+onConflict: 'id', ignoreDuplicates: true })` instead of the RPC call.
+`ignoreDuplicates: true` matches the old `on conflict (id) do nothing`
+semantics exactly — it won't stomp a role an admin already changed on an
+existing row. `ensure_profile()` itself is left in the schema, unused,
+rather than dropped.
+
+Verified live: migration applied via `psql -f` (policy count went from 36
+to 37 — the exact expected `+1`); confirmed the new policy's `with_check`
+reads `(id = auth.user_id())` via `pg_policies`; confirmed Shane's existing
+profile row (`role='staff'`, `full_name='Shane'`) is untouched. `npm run
+build` passes.
+
+**Why this matters beyond just quieting a console error:** before this fix,
+*any brand-new staff user's very first sign-in* would have hit this same
+`23502` failure, gotten the client-side-only fallback profile
+(`{role:'staff'}` in memory, never persisted), and then failed every
+RLS-protected read/write for that user — the exact "is_staff() returns
+false" cascade Shane hit originally, before I manually inserted his row via
+psql in an earlier addendum. This wasn't just cosmetic for Shane's one
+account; it meant staff onboarding was silently broken for everyone else.
+
+**Not yet re-checked (flagging, not closing):** the earlier
+`questionnaire_responses` RLS failure (a separate screenshot, same
+session) was investigated and found to be provably-working infrastructure
+hit by what looked like a one-off blip — Shane was asked to hard-refresh
+and retry, and hasn't yet reported back whether it recurred. If it recurs
+at the *same* step again, that's a stronger signal worth raising with Neon
+directly (their `pg_session_jwt` extension, not this app), separate from
+the RPC-specific issue fixed here.
+
 ---
 
 ## Blockers — need Shane / IMPI to proceed
