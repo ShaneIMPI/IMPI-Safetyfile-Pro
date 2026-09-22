@@ -31,14 +31,22 @@ export function useQuery(fn, deps = []) {
 export function useAsyncAction() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
-  const runAction = useCallback(async (fn) => {
+  // `error` state already drives every page's <ErrorBanner>, so callers don't
+  // need to catch a rethrow themselves — and almost none of them do, which
+  // used to mean every failed action was ALSO an unhandled promise rejection
+  // (most call sites are bare `async function` handlers wired straight to
+  // onClick/onChange, with no outer try/catch of their own). Pass
+  // { rethrow: true } only when the caller genuinely needs to react to the
+  // failure itself (e.g. DocumentBuilderPage/AuditWorkspacePage's generate
+  // functions, which clean up an orphaned row on failure).
+  const runAction = useCallback(async (fn, { rethrow = false } = {}) => {
     setBusy(true)
     setError(null)
     try {
       return await fn()
     } catch (e) {
       setError(e)
-      throw e
+      if (rethrow) throw e
     } finally {
       setBusy(false)
     }

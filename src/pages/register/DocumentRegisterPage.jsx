@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { neonClient } from '../../lib/neon.js'
-import { db } from '../../lib/db.js'
-import { useQuery } from '../../hooks/useQuery.js'
+import { db, deleteGeneratedDocument, deleteEvidenceDocument, isReferencedInSafetyFile } from '../../lib/db.js'
+import { useQuery, useAsyncAction } from '../../hooks/useQuery.js'
 import { Spinner, ErrorBanner, Toolbar } from '../../components/ui.jsx'
 import { fmtDate, refSortKey } from '../../lib/format.js'
 
@@ -15,7 +15,8 @@ async function load() {
 }
 
 export default function DocumentRegisterPage() {
-  const { data, loading, error } = useQuery(load, [])
+  const { data, loading, error, refetch } = useQuery(load, [])
+  const { busy, error: delErr, runAction } = useAsyncAction()
   const [q, setQ] = useState('')
   const [src, setSrc] = useState('')
   const [client, setClient] = useState('')
@@ -48,6 +49,19 @@ export default function DocumentRegisterPage() {
     URL.revokeObjectURL(a.href)
   }
 
+  async function deleteRow(r) {
+    await runAction(async () => {
+      const referenced = await isReferencedInSafetyFile(r.client_id, r.source_type, r.id)
+      const warn = referenced
+        ? '\n\nThis document is included in an assembled safety file — deleting it will not change that already-assembled PDF, but it will be removed from future assemblies.'
+        : ''
+      if (!window.confirm(`Permanently delete ${r.document_ref}?${warn}`)) return
+      if (r.source_type === 'generated') await deleteGeneratedDocument(r.id)
+      else await deleteEvidenceDocument(r.id)
+      refetch()
+    })
+  }
+
   return (
     <>
       <header><div className="crumb">Document control</div><h1>Document Control Register</h1></header>
@@ -66,11 +80,12 @@ export default function DocumentRegisterPage() {
         </select>
         <button className="btn-secondary" onClick={exportCsv}>Export CSV</button>
       </Toolbar>
+      <ErrorBanner error={delErr} />
 
       <div className="panel" style={{ padding: 0 }}>
         <table className="data">
           <thead>
-            <tr><th>Ref</th><th>Title</th><th>Source</th><th>Rev</th><th>Client</th><th>Prepared by / issuing body</th><th>Reviewed</th><th>Approved</th><th>Status</th><th>Date</th></tr>
+            <tr><th>Ref</th><th>Title</th><th>Source</th><th>Rev</th><th>Client</th><th>Prepared by / issuing body</th><th>Reviewed</th><th>Approved</th><th>Status</th><th>Date</th><th /></tr>
           </thead>
           <tbody>
             {filtered.map((r) => (
@@ -85,9 +100,10 @@ export default function DocumentRegisterPage() {
                 <td>{r.approved_by || '—'}</td>
                 <td><span className={`pill status-${r.status}`}>{r.status}</span></td>
                 <td>{fmtDate(r.doc_date)}</td>
+                <td><button className="btn-ghost btn-sm" disabled={busy} onClick={() => deleteRow(r)}>Delete</button></td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={10} className="muted" style={{ textAlign: 'center', padding: '1.5rem' }}>No documents match.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={11} className="muted" style={{ textAlign: 'center', padding: '1.5rem' }}>No documents match.</td></tr>}
           </tbody>
         </table>
       </div>

@@ -122,12 +122,12 @@ export default function AuditWorkspacePage() {
         await db.update('generated_documents', row.id, { file_url: url })
         await saveDocx(doc, filename)
         setReportUrl(url)
-      })
+      }, { rethrow: true })
     } catch {
       // runAction already logged this into actErr, shown via <ErrorBanner>
-      // above — caught again here only so a failure never surfaces as an
-      // unhandled promise rejection with nothing visible in the UI, and so a
-      // numbered-but-fileless row isn't left behind.
+      // above — caught again here (via { rethrow: true }, since runAction's
+      // default no longer rethrows) only to clean up a numbered-but-fileless
+      // row.
       if (row) {
         try {
           await db.remove('generated_documents', row.id)

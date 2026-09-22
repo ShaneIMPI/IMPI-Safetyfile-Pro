@@ -165,6 +165,37 @@ export async function refreshFileUrl(bucket, path) {
   return readUrl
 }
 
+// Best-effort deletion of a stored file, given the bucket it's known to live
+// in and the URL that was saved for it (a stored URL is either a presigned
+// private-bucket link with a signature query string, or a bare public
+// `logos` URL — the two need different parsing to recover the bucket key).
+// Never throws: the DB row is always the source of truth for whether a
+// document "exists", so a failed storage cleanup (object already gone, a URL
+// that doesn't parse) is logged and swallowed rather than blocking the
+// caller's delete flow.
+export async function deleteStorageFile(bucket, url) {
+  if (!url) return
+  try {
+    let path
+    if (bucket === 'logos') {
+      const base = (publicFilesBaseUrl || '').replace(/\/$/, '')
+      path = base && url.startsWith(base) ? decodeURIComponent(url.slice(base.length + 1)) : null
+    } else {
+      const marker = `/${bucket}/`
+      const pathname = new URL(url).pathname
+      const idx = pathname.indexOf(marker)
+      path = idx === -1 ? null : decodeURIComponent(pathname.slice(idx + marker.length))
+    }
+    if (!path) {
+      console.error('[IMPI] Could not determine storage path for cleanup — skipping:', bucket, url)
+      return
+    }
+    await callFunction(fileFnUrl, { action: 'delete', bucket, path })
+  } catch (err) {
+    console.error('[IMPI] Best-effort storage cleanup failed (the database row is already deleted):', bucket, url, err)
+  }
+}
+
 async function putToPresignedUrl(uploadUrl, file) {
   const res = await fetch(uploadUrl, {
     method: 'PUT',

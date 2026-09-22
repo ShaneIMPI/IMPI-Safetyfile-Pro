@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { neonClient, uploadFile } from '../../lib/neon.js'
-import { db } from '../../lib/db.js'
+import { db, gatherClientDeletionInfo, deleteClientCascade, deleteGeneratedDocument, deleteEvidenceDocument, isReferencedInSafetyFile } from '../../lib/db.js'
 import { useQuery, useAsyncAction } from '../../hooks/useQuery.js'
 import { Spinner, ErrorBanner, Field } from '../../components/ui.jsx'
 import { fmtDate, isExpired } from '../../lib/format.js'
@@ -21,6 +21,7 @@ async function loadClientBundle(id) {
 
 export default function ClientDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { data, loading, error, refetch } = useQuery(() => loadClientBundle(id), [id])
   const { busy, error: saveErr, runAction } = useAsyncAction()
   const [form, setForm] = useState(null)
@@ -62,11 +63,49 @@ export default function ClientDetailPage() {
     })
   }
 
+  async function deleteClient() {
+    await runAction(async () => {
+      const info = await gatherClientDeletionInfo(id)
+      const { counts } = info
+      const parts = [
+        `${counts.generated} generated document${counts.generated === 1 ? '' : 's'}`,
+        `${counts.audits} audit${counts.audits === 1 ? '' : 's'}`,
+        `${counts.evidence} evidence document${counts.evidence === 1 ? '' : 's'}`,
+      ]
+      if (counts.safetyFiles) parts.push(`${counts.safetyFiles} assembled safety file${counts.safetyFiles === 1 ? '' : 's'}`)
+      const ok = window.confirm(
+        `This will permanently delete ${data.client.company_name} and ${parts.join(', ')}. This cannot be undone.`,
+      )
+      if (!ok) return
+      await deleteClientCascade(id, info.files)
+      navigate('/clients')
+    })
+  }
+
+  // Delete on a generated/evidence document row — checks whether it's part
+  // of an already-assembled safety file first, purely to inform the warning
+  // text (the addendum treats this as informational, never a block).
+  async function deleteDoc(kind, docId, ref) {
+    await runAction(async () => {
+      const referenced = await isReferencedInSafetyFile(id, kind, docId)
+      const warn = referenced
+        ? '\n\nThis document is included in an assembled safety file — deleting it will not change that already-assembled PDF, but it will be removed from future assemblies.'
+        : ''
+      if (!window.confirm(`Permanently delete ${ref}?${warn}`)) return
+      if (kind === 'generated') await deleteGeneratedDocument(docId)
+      else await deleteEvidenceDocument(docId)
+      refetch()
+    })
+  }
+
   return (
     <>
       <header>
         <div className="crumb"><Link to="/clients">Clients</Link> / {data.client.company_name}</div>
-        <h1>{data.client.company_name} <span className="mono muted" style={{ fontSize: '1rem' }}>{data.client.client_code}</span></h1>
+        <h1 style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>{data.client.company_name} <span className="mono muted" style={{ fontSize: '1rem' }}>{data.client.client_code}</span></span>
+          <button className="btn-danger btn-sm" disabled={busy} onClick={deleteClient}>Delete client</button>
+        </h1>
       </header>
       <ErrorBanner error={saveErr} />
 
@@ -126,9 +165,11 @@ export default function ClientDetailPage() {
           </span>
         </div>
         <h3>Generated ({data.generated.length})</h3>
-        <DocList rows={data.generated.map((g) => ({ ref: g.document_ref, name: g.document_templates?.name, status: g.status, when: g.generated_at, url: g.pdf_url || g.file_url }))} />
+        <DocList rows={data.generated.map((g) => ({ id: g.id, ref: g.document_ref, name: g.document_templates?.name, status: g.status, when: g.generated_at, url: g.pdf_url || g.file_url }))}
+          onDelete={(r) => deleteDoc('generated', r.id, r.ref)} />
         <h3 style={{ marginTop: 16 }}>Evidence ({data.evidence.length})</h3>
-        <EvidenceTable rows={data.evidence} onReview={(row, patch) => runAction(async () => { await db.update('evidence_documents', row.id, patch); refetch() })} />
+        <EvidenceTable rows={data.evidence} onReview={(row, patch) => runAction(async () => { await db.update('evidence_documents', row.id, patch); refetch() })}
+          onDelete={(row) => deleteDoc('evidence', row.id, row.document_ref)} />
         <h3 style={{ marginTop: 16 }}>Assembled safety files ({data.files.length})</h3>
         <DocList rows={data.files.map((f) => ({ ref: f.document_ref, name: f.title || 'Health & Safety File', status: 'final', when: f.compiled_at, url: f.final_pdf_url }))} />
       </div>
@@ -136,7 +177,7 @@ export default function ClientDetailPage() {
   )
 }
 
-function EvidenceTable({ rows, onReview }) {
+function EvidenceTable({ rows, onReview, onDelete }) {
   const { profile } = useAuth()
   if (!rows.length) return <div className="muted">None.</div>
   return (
@@ -172,6 +213,7 @@ function EvidenceTable({ rows, onReview }) {
               {e.status === 'rejected' && (
                 <button className="btn-ghost btn-sm" onClick={() => onReview(e, { status: 'pending_review', reviewed_by: null })}>Reopen</button>
               )}
+              {' '}<button className="btn-ghost btn-sm" onClick={() => onDelete(e)}>Delete</button>
             </td>
           </tr>
           )
@@ -181,11 +223,11 @@ function EvidenceTable({ rows, onReview }) {
   )
 }
 
-function DocList({ rows }) {
+function DocList({ rows, onDelete }) {
   if (!rows.length) return <div className="muted">None.</div>
   return (
     <table className="data">
-      <thead><tr><th>Ref</th><th>Title</th><th>Status</th><th>Date</th><th /></tr></thead>
+      <thead><tr><th>Ref</th><th>Title</th><th>Status</th><th>Date</th><th /><th /></tr></thead>
       <tbody>
         {rows.map((r, i) => (
           <tr key={i}>
@@ -194,6 +236,7 @@ function DocList({ rows }) {
             <td><span className={`pill status-${r.status}`}>{r.status}</span></td>
             <td>{fmtDate(r.when)}</td>
             <td>{r.url ? <a href={r.url} target="_blank" rel="noreferrer">Open</a> : <span className="muted">—</span>}</td>
+            <td>{onDelete && <button className="btn-ghost btn-sm" onClick={() => onDelete(r)}>Delete</button>}</td>
           </tr>
         ))}
       </tbody>

@@ -528,6 +528,95 @@ Risk Assessment finalized), each with a genuine presigned storage URL and
 `generated_by` set to Shane's profile id. Both the draft and
 "Generate & finalize" paths work end-to-end.
 
+## Follow-up (2026-09-22) — every `runAction` call site was an unhandled promise rejection
+
+While going through the other screens (Audits, Final Assembly, Evidence),
+found that `useAsyncAction`'s `runAction` sets the hook's `error` state
+*and* re-throws, but nearly every call site is a bare `async function`
+wired straight to `onClick`/`onChange` with no outer `try/catch` of its
+own — meaning every single failed action anywhere in the app (not just the
+two `generate` functions Addendum 5 fixed) was *also* an unhandled promise
+rejection, even though the UI correctly showed `<ErrorBanner>` regardless.
+This is exactly the kind of console noise that made the real bugs in this
+session harder to isolate (multiple overlapping errors, "which one is the
+new one" confusion).
+
+Fixed at the source rather than at each of the ~20 call sites:
+`runAction(fn, { rethrow: true })` is now opt-in (default `false`), since
+the `error` state already drives every page's `<ErrorBanner>` and almost no
+caller needs the throw itself. Only `DocumentBuilderPage.generate()` and
+`AuditWorkspacePage.generateReport()` pass `{ rethrow: true }`, since their
+own outer `try/catch` needs it to clean up an orphaned
+numbered-but-fileless row on failure. Every other call site (client save,
+logo upload, sector toggle, audit creation + source-file upload, evidence
+upload, PDF rendition upload, safety-file assembly, library/checklist
+edits) needed no changes at all. Verified: `npm run build` and
+`npm run lint` both pass, no new warnings.
+
+## Addendum 8 (2026-09-22) — Delete Clients & Documents
+
+Permanent (no archive/soft-delete) deletion of clients and individual
+documents, per Shane's addendum.
+
+**Client delete is a single `DELETE FROM clients WHERE id = $1`, not a new
+RPC function.** Checked the schema first: `client_sectors`,
+`generated_documents`, `evidence_documents`, `audits`, `audit_results` (via
+`audits`), `questionnaire_responses`, `safety_files`, and
+`document_counters` **all already carry `on delete cascade` foreign keys
+back to `clients`** (0001_schema.sql), and `evidence_document_files`
+cascades from `evidence_documents` the same way (0005_evidence_files.sql).
+A single DELETE statement with cascading FKs is one atomic Postgres
+transaction — genuinely all-or-nothing, satisfying the addendum's "single
+transaction" requirement, without writing a SECURITY DEFINER RPC function.
+This was a deliberate choice given Addendum 6's finding that this
+project's `auth.user_id()` is not reliable specifically through the
+`.rpc()` code path — `.from()` calls are the proven-reliable path, so the
+whole cascade delete goes through `db.remove('clients', id)` rather than a
+new stored procedure.
+
+Storage files aren't part of that transaction (S3 has no concept of one),
+so `gatherClientDeletionInfo()` (`src/lib/db.js`) collects every file URL
+(`generated_documents.file_url`/`pdf_url`, each
+`evidence_document_files.file_url`, `safety_files.final_pdf_url`,
+`clients.logo_url`) **before** the delete, and `deleteClientCascade()`
+deletes them from storage **after** the DB delete succeeds, one at a time,
+best-effort (a failed storage cleanup is logged and swallowed — the DB row
+being gone is what "deleted" means to the rest of the app; an orphaned S3
+object is a minor leak, not a correctness problem).
+
+**Confirmation shows real counts**, per the addendum: before deleting,
+`gatherClientDeletionInfo()` counts generated documents, evidence
+documents, audits, and assembled safety files for that specific client and
+builds the confirmation text from those numbers, not a generic message.
+
+**Individual document delete** (Document Register + client detail page):
+`deleteGeneratedDocument()`/`deleteEvidenceDocument()` fetch the file
+URL(s) first, delete the row (cascading `evidence_document_files` for the
+evidence case), then best-effort clean up storage the same way.
+`isReferencedInSafetyFile()` checks the client's `safety_files.
+included_document_ids` (a jsonb array of `{kind, id, toc_title,
+document_ref}`, matching exactly what `FinalAssemblyPage.assemble()`
+writes) and adds an informational warning to the confirmation text if
+found — never blocks the delete, per the addendum.
+
+**Numbering is untouched** — `document_counters` only ever increments
+(`next_doc_seq()` in 0002_functions.sql), and deleting a row doesn't touch
+it, so a deleted document's reference number is never reused.
+
+**New Function action, not a new Function:** `file-access` gained a
+`delete` action (`DeleteObjectCommand`), reusing the exact same
+`authorize()` check already used for `presign-put`/`presign-get` — no new
+authorization logic to get wrong. `document_control_register`
+(0008_document_register_id.sql) gained a trailing `id` column (`CREATE OR
+REPLACE VIEW` can only append columns, not reorder them) so the register's
+rows have something to delete by; `document_ref` alone wasn't enough.
+
+Verified: `npm run build` and `npm run lint` pass; migration applied live
+(`select id from document_control_register` now returns real ids);
+`fileaccess` redeployed (deployment 5) with the `delete` action. Not yet
+verified against a real signed-in delete (needs Shane to click through it,
+the same limitation as every other live-only check this session).
+
 ---
 
 ## Blockers — need Shane / IMPI to proceed

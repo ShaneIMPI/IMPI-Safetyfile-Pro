@@ -141,12 +141,12 @@ export default function DocumentBuilderPage() {
         await saveDocx(doc, filename)
 
         setResult({ ref: row.document_ref, url, filename })
-      })
+      }, { rethrow: true })
     } catch {
       // runAction already logged this into genErr, shown via <ErrorBanner>
-      // above — caught again here only so a failed generation never surfaces
-      // as an unhandled promise rejection with nothing visible in the UI, and
-      // so the numbered-but-fileless row below can be cleaned up.
+      // above — caught again here (via { rethrow: true }, since runAction's
+      // default no longer rethrows) only to clean up the numbered-but-fileless
+      // row below.
       if (row) {
         try {
           await db.remove('generated_documents', row.id)

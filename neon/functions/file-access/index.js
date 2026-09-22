@@ -22,7 +22,7 @@
 //    reads below.
 //  - DATABASE_URL: confirmed auto-injected by Neon for every Function.
 
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 import { Client } from 'pg'
@@ -169,6 +169,16 @@ export default {
         { expiresIn: 60 * 60 * 24 * 7 },
       )
       return json({ readUrl })
+    }
+
+    // Used by client/document deletion (DECISIONS.md addendum 8) to clean up
+    // the underlying object once its DB row is gone. Best-effort from the
+    // caller's side — a delete that 404s here (object already gone, or the
+    // path couldn't be derived from a stored URL) is treated as success by
+    // the caller either way, since the DB row is the source of truth.
+    if (action === 'delete') {
+      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: path }))
+      return json({ ok: true })
     }
 
     return json({ error: 'unknown_action' }, 400)
