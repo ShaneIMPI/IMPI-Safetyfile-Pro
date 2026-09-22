@@ -125,30 +125,7 @@ async function callFunction(url, body) {
     body: JSON.stringify(body),
   })
   const json = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    // TEMPORARY DIAGNOSTIC (2026-09-22) — remove once the persistent
-    // "unauthorised" from file-access is root-caused. Confirmed separately
-    // (a direct unauthenticated curl to this Function) that
-    // NEON_AUTH_JWKS_URL/NEON_AUTH_BASE_URL/DATABASE_URL are genuinely
-    // present at runtime, ruling out missing env vars. This re-sends the
-    // SAME token this failing request just used to a debug-env action on
-    // the same Function, which runs jwtVerify itself and reports the real
-    // jose failure reason (expired/wrong issuer/JWKS fetch failure/...)
-    // instead of the generic "unauthorised" this call site just got.
-    if (url.includes('fileaccess') && token) {
-      try {
-        const diag = await fetch(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-          body: JSON.stringify({ action: 'debug-env' }),
-        }).then((r) => r.json())
-        console.error('[IMPI] file-access call failed — diagnostic detail:', diag)
-      } catch (diagErr) {
-        console.error('[IMPI] file-access diagnostic call itself failed:', diagErr)
-      }
-    }
-    throw new Error(json.error || `Request failed (${res.status})`)
-  }
+  if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`)
   return json
 }
 

@@ -27,12 +27,19 @@ function getJwks() {
   return jwks
 }
 
+// CORRECTED (2026-09-22, same fix as file-access/index.js): NEON_AUTH_BASE_URL
+// is the Auth API's base URL (includes a path, e.g. ".../neondb/auth"), but a
+// real JWT's `iss` claim is just the bare origin — confirmed by decoding a
+// real failing token's claims directly. Comparing against the full base URL
+// made every real caller fail with jose's "unexpected iss claim value".
+const authIssuer = new URL(process.env.NEON_AUTH_BASE_URL ?? 'http://localhost').origin
+
 async function verifyCaller(request) {
   const auth = request.headers.get('authorization') || ''
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null
   if (!token) return null
   try {
-    const { payload } = await jwtVerify(token, getJwks(), { issuer: process.env.NEON_AUTH_BASE_URL })
+    const { payload } = await jwtVerify(token, getJwks(), { issuer: authIssuer })
     return payload.sub ?? null
   } catch {
     return null

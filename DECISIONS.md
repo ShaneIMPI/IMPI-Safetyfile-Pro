@@ -474,6 +474,56 @@ at the *same* step again, that's a stronger signal worth raising with Neon
 directly (their `pg_session_jwt` extension, not this app), separate from
 the RPC-specific issue fixed here.
 
+## Addendum 7 (2026-09-22) — `file-access` "unauthorised" root-caused: wrong expected JWT issuer
+
+Addendum 6 fixed profile bootstrap, but Document Builder generation still
+failed with "unauthorised" from the `file-access` Function on every
+attempt. Rather than guess again, added temporary diagnostics and got the
+exact jose failure directly from Shane's real signed-in session:
+
+1. First ruled out "env vars not auto-injected" as the cause — a temporary
+   `debug-env` action on the deployed Function confirmed
+   `NEON_AUTH_JWKS_URL`, `NEON_AUTH_BASE_URL`, and `DATABASE_URL` are all
+   genuinely present at runtime. (This also retroactively means the earlier
+   "confirmed via a clean 401 rather than 500" check in Addendum 2 wasn't
+   actually proof of anything about these three env vars — an
+   unauthenticated request returns 401 from the `if (!token) return null`
+   branch, before `getJwks()`/`jwtVerify` ever run. Worth remembering: a 401
+   with no token proves nothing about JWT verification working.)
+2. Wired the same `debug-env` action into `callFunction()`'s error path
+   client-side, so Shane's next real (signed-in) generation attempt
+   automatically ran `jwtVerify` against his real token and reported jose's
+   actual error via console, instead of the generic "unauthorised" the app
+   normally shows. Result: `errorMessage: 'unexpected "iss" claim value'`.
+3. Extended the diagnostic to decode (not verify — claims are signed, not
+   encrypted, so reading them without checking the signature is safe and
+   tells you nothing you could act on maliciously) the real token's actual
+   `iss`/`aud` claims alongside the expected value, and compare them
+   side by side. Got back:
+   - actual `iss`: `https://ep-crimson-flower-b2pmveyq.neonauth.c-6.eu-central-1.aws.neon.tech`
+   - expected (`NEON_AUTH_BASE_URL`): `https://ep-crimson-flower-b2pmveyq.neonauth.c-6.eu-central-1.aws.neon.tech/neondb/auth`
+
+**Root cause:** `NEON_AUTH_BASE_URL` is the Auth API's base URL (has a
+path — used for endpoints like `/token`, `/sign-in`). A real JWT's `iss`
+claim is the bare origin, no path. `verifyCaller()` in both
+`file-access/index.js` and `audit-suggest/index.js` passed
+`NEON_AUTH_BASE_URL` directly as `jwtVerify`'s `issuer` option, which does
+an exact string match — so it failed for every real caller, always, not
+intermittently. (`audit-suggest` has the identical pattern; fixed the same
+way there even though it's not wired up with an API key yet, so it isn't
+carrying this same bug forward silently for whenever it is.)
+
+**Fixed:** both functions now derive the issuer as
+`new URL(process.env.NEON_AUTH_BASE_URL).origin` instead of using the full
+base URL. Removed the temporary `debug-env` diagnostic action and the
+matching client-side diagnostic call in `callFunction()` (`src/lib/neon.js`)
+once the real fix was deployed and confirmed — this addendum's fix is the
+permanent state, not the diagnostics that found it.
+
+Verified: `npm run build` passes; both Functions redeployed
+(`fileaccess`/4, `auditsuggest`/2). Awaiting Shane's confirmation that
+Document Builder generation now completes end-to-end.
+
 ---
 
 ## Blockers — need Shane / IMPI to proceed
