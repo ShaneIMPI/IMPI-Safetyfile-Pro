@@ -66,26 +66,47 @@ export const authClient = neonClient.auth
 // version changes this again, don't re-add a typeof guard; re-verify with a
 // fetch interceptor the way this was diagnosed, not by trusting a method's
 // mere existence.
+// Matches a JWT's shape: three non-empty base64url segments. Real signed
+// tokens from this endpoint are the only thing in its response remotely
+// resembling this, so finding one anywhere in the payload is unambiguous.
+const JWT_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
+
+// Walk an arbitrary response object looking for a JWT-shaped string, at any
+// depth, under any field name. Used instead of reading one guessed field path
+// (e.g. res.data.token) because that was guessed wrong twice in a row against
+// this project's actual Neon Auth response — confirmed via a real signed-in
+// browser console log that a JWT genuinely is in there, just not at either
+// guessed path. This makes the exact field name/nesting irrelevant.
+function findJwtLike(value, depth = 0) {
+  if (depth > 4 || value == null) return null
+  if (typeof value === 'string') return JWT_SHAPE.test(value) ? value : null
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findJwtLike(item, depth + 1)
+      if (found) return found
+    }
+    return null
+  }
+  if (typeof value === 'object') {
+    for (const key of Object.keys(value)) {
+      const found = findJwtLike(value[key], depth + 1)
+      if (found) return found
+    }
+  }
+  return null
+}
+
 export async function getAccessToken() {
   try {
     const res = await authClient.token()
-    // The endpoint's success shape for a *signed-in* call has not been
-    // directly observed yet — every check while diagnosing this was
-    // necessarily unauthenticated (no real credentials to test with; pulling
-    // a live session token from the database to test against was refused by
-    // this environment's own safety checks, correctly — that would mean
-    // materializing a real user's live session, not just reading config).
-    // TEMPORARY: logging the raw shape so it can be read once, from a real
-    // signed-in browser, then this whole console.info block comes back out.
-    console.info('[IMPI][diagnostic] authClient.token() resolved with:', JSON.stringify(res))
-    const token = res?.data?.token ?? res?.token ?? (typeof res?.data === 'string' ? res.data : null)
+    const token = findJwtLike(res)
     if (token) return token
-    console.error('[IMPI] authClient.token() succeeded but no token could be extracted from the response shape above.')
+    console.error('[IMPI] authClient.token() succeeded but no JWT-shaped value was found anywhere in the response:', JSON.stringify(res))
   } catch (err) {
     console.error('[IMPI] authClient.token() failed, falling back to session lookup:', err)
   }
   const { data } = await authClient.getSession()
-  const fallback = data?.session?.token ?? null
+  const fallback = findJwtLike(data) ?? data?.session?.token ?? null
   if (!fallback) {
     console.error('[IMPI] No access token available from either authClient.token() or getSession() — the request below will go out unauthenticated and the Function will correctly reject it.')
   }
